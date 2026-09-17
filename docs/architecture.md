@@ -22,6 +22,7 @@ src/BancontactPro.Net/
 ├── Reconciliation/  IReconciliationClient / ReconciliationClient
 ├── Models/          DTOs shared across the three typed clients and the webhook payload
 ├── Http/            BancontactApiException + shared error-response handling
+├── QrCodes/         PaymentLinkBuilder -- client-templated QR/deeplink URLs (no HTTP call)
 ├── Helpers/         DI registration (BancontactProOptions, validator, service collection extensions)
 └── BancontactJsonOptions.cs   The one JsonSerializerOptions every DTO in this library uses
 ```
@@ -118,6 +119,35 @@ Three layers, each independently testable:
    the application-facing API, and "this callback can't be trusted" is exactly the kind of thing
    that should stop request processing via an exception, not a value the caller might
    accidentally ignore.
+
+## QR and deeplink URL templating (On a Receipt, Top Up, Static QR)
+
+Every operation covered so far is a signed HTTP call. `QrCodes/PaymentLinkBuilder.cs` is
+different — it makes no HTTP call at all. For On a Receipt and Top Up (and Static QR's
+one-time-printed code), the QR/deeplink content isn't returned by any endpoint; the merchant
+builds it locally by templating a known URL scheme, confirmed against Bancontact's
+[Payment link update](https://docs.bancontactpro.com/guides/general/payloadurlupdate) migration
+page and the per-product guides:
+
+```text
+payload (On a Receipt / Top Up)  = https://pay.bancontact.net/t/1/{PPID}?D={description}&A={amountCents}&R={reference}
+payload (Static QR, printed once) = https://pay.bancontact.net/l/1/{PPID}/{posId}
+qr image                          = https://qrcodegenerator.api.bancontact.net/qrcode?f={PNG|SVG}&s={S|M|L|XL}&c={url-encoded payload}
+```
+
+Two encoding passes matter here, and `PaymentLinkBuilder` replicates both rather than
+flattening them into one: the individual `D`/`A`/`R` values are UTF-8 percent-encoded once when
+building the payload URL, then the *entire* payload URL is percent-encoded again when embedded
+as the `c=` parameter. Getting this wrong (e.g. only encoding once) produces a QR the payer's
+banking app can't parse. The test suite asserts exact output against the worked examples
+Bancontact publishes on those pages, rather than just checking "it round-trips" — those are the
+only ground truth available for an endpoint-less, pure-string-templating scheme like this one.
+
+This gap wasn't visible from the OpenAPI specs at all (it's not an HTTP operation, so there was
+nothing for the "verify against the raw spec" pass behind issues #2–#7 to find) — it only
+surfaced from reading the On a Receipt/Top Up/Static QR prose guides directly. See
+[research-notes.md](research-notes.md) for how it was found and the Static QR "location link vs.
+per-transaction amount" distinction it depends on.
 
 ## Error handling
 

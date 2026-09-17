@@ -25,7 +25,9 @@ OpenAPI specs are the authoritative source for anything not covered here:
   [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4),
   [Refunds](https://docs.bancontactpro.com/guides/general/refunds052025),
   [Reconciliation](https://docs.bancontactpro.com/guides/general/reconciliation052025),
-  [Payout & remittance](https://docs.bancontactpro.com/guides/general/payoutremittance052025).
+  [Payout & remittance](https://docs.bancontactpro.com/guides/general/payoutremittance052025),
+  [Payment link update](https://docs.bancontactpro.com/guides/general/payloadurlupdate) (the
+  Payconiq→Bancontact Pro domain migration — relevant to step 12).
 
 **Not covered here**: Bancontact also documents an
 [Online Sales](https://docs.bancontactpro.com/guides/online/onlinesales) product (hosted
@@ -274,9 +276,44 @@ var payment = await paymentClient.CreateStaticQrPaymentAsync(
 
 Creating a new static QR payment for the same `PosId`/profile combination invalidates any
 existing active one for that POS — this is by design (it's how a physical, reusable QR code at
-a till gets "refreshed" for the next customer), not something to guard against client-side.
+a till gets "refreshed" for the next customer), not something to guard against client-side. The
+*printed* QR code itself is a separate, one-time thing — see step 12.
 
-## 12. Reconciliation (accounting, not the checkout flow)
+## 12. Print a QR code without calling the API (On a Receipt, Top Up, Static QR setup)
+
+On a Receipt, Top Up, and Static QR's printed code are all built **client-side** — there's no
+REST call that returns them. See
+[architecture.md](architecture.md#qr-and-deeplink-url-templating-on-a-receipt-top-up-static-qr)
+for why this is structurally different from steps 6 and 11 above.
+
+For On a Receipt or Top Up (a fresh QR per transaction, amount baked in):
+
+```csharp
+var payload = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(
+    productProfileId: "your-ppid",
+    amountCents: 250,
+    description: "Coffee",
+    reference: orderReference);
+
+var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(payload, QrCodeImageFormat.PNG, QrCodeImageSize.M);
+```
+
+Omit `amountCents` for Top Up's "open value" QR type (the payer enters the amount themselves) —
+whether a given Top Up product is open-value, modifiable, or fixed is configured by devsupport
+at product creation, not something this call controls.
+
+For Static QR's printed code (a one-time setup step, separate from
+`CreateStaticQrPaymentAsync` in step 11, which attaches the actual amount per transaction):
+
+```csharp
+var payload = PaymentLinkBuilder.BuildStaticQrLocationUrl(productProfileId: "your-ppid", posId: "till-1");
+var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(payload, QrCodeImageFormat.SVG);
+```
+
+Print `qrImageUrl` once; from then on, each sale at that till calls `CreateStaticQrPaymentAsync`
+with the same `posId` to attach a fresh amount to that already-printed code.
+
+## 13. Reconciliation (accounting, not the checkout flow)
 
 Backed by the
 [Reconciliation API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json).
