@@ -223,6 +223,13 @@ Matches v1 closely; a few exact field names confirmed from the raw spec:
   project, and the "wrap what the API exposes" scoping principle applies as normal.
 - No test-card/sandbox-simulation details surfaced in any of the fetched pages — still only
   resolvable once preprod credentials arrive.
+- **Discovered, not yet acted on (2026-09-17):** every 2xx/4xx response from the Reconciliation
+  API declares its own `Signature` response header — Bancontact signs its own reconciliation
+  responses, the same detached-JWS scheme used elsewhere. Neither the Payment nor Refund specs
+  do this for ordinary (non-callback) responses. Not verified by `ReconciliationClient` (#7) —
+  out of scope for that issue and not requested — but worth a follow-up issue if
+  defense-in-depth response verification is ever wanted, since the machinery from #12/#13
+  (JWKS client + `BancontactSignatureVerifier`) would mostly carry over.
 
 ---
 
