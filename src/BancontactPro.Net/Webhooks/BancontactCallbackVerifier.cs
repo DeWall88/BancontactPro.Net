@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using BancontactPro.Models;
 using BancontactPro.Signing;
 
@@ -12,12 +11,6 @@ namespace BancontactPro.Webhooks;
 /// </summary>
 public sealed class BancontactCallbackVerifier
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter() },
-    };
-
     private readonly BancontactSignatureVerifier _signatureVerifier;
 
     /// <param name="signatureVerifier">Verifies the callback's detached JWS.</param>
@@ -47,7 +40,7 @@ public sealed class BancontactCallbackVerifier
         MerchantCallback? payload;
         try
         {
-            payload = JsonSerializer.Deserialize<MerchantCallback>(body.Span, JsonOptions);
+            payload = JsonSerializer.Deserialize<MerchantCallback>(body.Span, BancontactJsonOptions.Default);
         }
         catch (JsonException ex)
         {
