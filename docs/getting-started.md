@@ -4,6 +4,18 @@ A step-by-step guide to integrating BancontactPro.Net into an application, from 
 through your first payment and webhook. For *why* things work the way they do (the signing
 scheme, the JWKS caching, the client internals), see [architecture.md](architecture.md).
 
+This library wraps three of Bancontact's own APIs, whose official documentation and raw
+OpenAPI specs are the authoritative source for anything not covered here:
+
+- [Bancontact Pro developer portal](https://docs.bancontactpro.com/) — overview, guides, and
+  the interactive API reference.
+- [Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json)
+  (raw OpenAPI JSON, v3.6.5 as of this writing) — backs `IPaymentClient`.
+- [Refund API spec](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json)
+  (v3.0.3) — backs `IRefundClient`.
+- [Reconciliation API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json)
+  (v3.0.1) — backs `IReconciliationClient`.
+
 ## 1. Onboarding (do this first — it has a lead time)
 
 Bancontact Pro isn't self-serve. Before you can call anything:
@@ -12,7 +24,9 @@ Bancontact Pro isn't self-serve. Before you can call anything:
    your company name, Merchant ID, contact details, and which integration type(s) you need (On a
    Display, On a Receipt, Static QR, Top Up). Expect up to **two weeks** turnaround. They'll issue
    a Product Profile ID (PPID) and API key per integration type.
-2. **Production**: apply via the merchant portal once pre-production is verified working.
+2. **Production**: apply via the merchant portal once pre-production is verified working (the
+   application portal is separate from the [developer docs](https://docs.bancontactpro.com/) —
+   devsupport will point you to it).
 
 You'll also need to generate your own signing key pair (step 2) and share the public half with
 Bancontact during onboarding — they need it before your merchant profile can accept signed
@@ -93,6 +107,9 @@ than failing confusingly later on the first real API call.
 
 ## 6. Create a payment
 
+Corresponds to `POST /v3/payments` in the
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json).
+
 ```csharp
 public class CheckoutService(IPaymentClient paymentClient)
 {
@@ -122,7 +139,9 @@ The response's `PaymentId` is valid for 20 minutes. `Links.Self` is the polling 
 
 Bancontact calls back asynchronously once the customer confirms (or the payment fails/expires).
 **Callback and redirect ordering isn't guaranteed** — always treat the callback as the primary
-signal and use polling (step 8) as a fallback, not the other way around.
+signal and use polling (step 8) as a fallback, not the other way around. The callback body shape
+is the `merchant-callback` schema in the
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json).
 
 ```csharp
 app.MapPost("/bancontact/callback", async (HttpRequest request, BancontactCallbackVerifier verifier, IMyOrderStore orders) =>
@@ -184,6 +203,9 @@ await paymentClient.CancelAsync(paymentId); // throws BancontactApiException (PA
 
 ## 10. Issue a refund
 
+Corresponds to `POST /v3/payments/{payment-id}/refunds` in the
+[Refund API spec](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json).
+
 ```csharp
 var refund = await refundClient.CreateAsync(
     paymentId,
@@ -200,12 +222,17 @@ that's specifically a caller bug (the key no longer identifies the same logical 
 not a transient failure worth blindly retrying.
 
 If you need to transfer a refund manually instead (rare — most refunds go through the Refund
-API above), `GetDebtorRefundIbanAsync` on `IPaymentClient` returns the customer's unmasked IBAN,
-but only once the payment is `SUCCEEDED`.
+API above), `GetDebtorRefundIbanAsync` on `IPaymentClient` (`GET
+/v3/payments/{id}/debtor/refundIban` in the
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json) —
+yes, it lives there rather than in the Refund spec) returns the customer's unmasked IBAN, but
+only once the payment is `SUCCEEDED`.
 
 ## 11. Static QR (point-of-sale) payments
 
-For in-person/POS integrations rather than online checkout:
+For in-person/POS integrations rather than online checkout. Corresponds to `POST
+/v3/payments/pos` in the
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json):
 
 ```csharp
 var payment = await paymentClient.CreateStaticQrPaymentAsync(
@@ -218,6 +245,8 @@ a till gets "refreshed" for the next customer), not something to guard against c
 
 ## 12. Reconciliation (accounting, not the checkout flow)
 
+Backed by the
+[Reconciliation API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json).
 Data is only available **D+1, starting 09:00 CET** — don't build same-day reconciliation UX.
 
 ```csharp

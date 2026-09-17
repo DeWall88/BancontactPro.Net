@@ -24,7 +24,7 @@ separate API — not clients for Bancontact Pro itself.
 
 ## Scope
 
-**Payment API** (`IPaymentClient`)
+**Payment API** (`IPaymentClient`, [spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json))
 - **Create payment** — `POST /v3/payments`, returns a payment id (valid 20 minutes), a hosted
   checkout URL, a raw QR-code URL (for a self-rendered checkout page), and a mobile deeplink.
 - **Get payment status** — `GET /v3/payments/{id}` — also the recommended polling fallback,
@@ -35,12 +35,12 @@ separate API — not clients for Bancontact Pro itself.
 - **Debtor refund IBAN** — `GET /v3/payments/{id}/debtor/refundIban`, feeds a manual refund.
 - **Static QR (POS)** — `POST /v3/payments/pos`, for in-person/point-of-sale payments.
 
-**Refund API** (`IRefundClient`)
+**Refund API** (`IRefundClient`, [spec](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json))
 - **Create refund** — `POST /v3/payments/{payment-id}/refunds` (idempotent via an
   `Idempotency-Key` header, requires `MERCHANT_REFUND` authority).
 - **Get refund** — `GET /v3/payments/{payment-id}/refunds/{refund-id}`.
 
-**Reconciliation API** (`IReconciliationClient`) — matching bank payouts against the
+**Reconciliation API** (`IReconciliationClient`, [spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json)) — matching bank payouts against the
 transactions/refunds behind them, for accounting rather than the customer-facing flow. Data is
 only available D+1 09:00 CET.
 - **List payouts** — `GET /v3/reconciliation/payouts`

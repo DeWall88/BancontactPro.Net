@@ -4,6 +4,13 @@ How BancontactPro.Net is put together internally, and why. For a task-oriented w
 [getting-started.md](getting-started.md). For the raw API research this was built from —
 including spec quirks and open questions — see [research-notes.md](research-notes.md).
 
+Everything here is derived from Bancontact's own raw OpenAPI specs, linked throughout below and
+collected here for reference:
+[Payment](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json) ·
+[Refund](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json) ·
+[Reconciliation](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json) ·
+[developer portal](https://docs.bancontactpro.com/).
+
 ## Project layout
 
 ```text
@@ -26,8 +33,13 @@ with a bare `BancontactPro` root namespace reserved for cross-cutting pieces lik
 ## The signing scheme
 
 Every outgoing request and every inbound webhook callback carries a **detached JWS** (JSON Web
-Signature) using ES256 (ECDSA on P-256), computed per RFC 7797. This is *not* the usual 3-part
-compact JWS (`header.payload.signature`) — Bancontact's variant has no payload segment at all:
+Signature) using ES256 (ECDSA on P-256), computed per [RFC 7797](https://www.rfc-editor.org/rfc/rfc7797).
+The scheme itself is documented in the `securitySchemes` section of each spec (e.g. the
+`api_key_payment_profile`/JWS security scheme descriptions in the
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json)) —
+this section summarizes what's there, plus a couple of things the prose descriptions get wrong or
+leave ambiguous (see the quirks section below). This is *not* the usual 3-part compact JWS
+(`header.payload.signature`) — Bancontact's variant has no payload segment at all:
 
 ```text
 Signature header value = base64url(JOSE header) + "." + base64url(ES256 signature)
@@ -108,10 +120,13 @@ Three layers, each independently testable:
 a non-success HTTP response into an exception, shared by all three typed clients. It parses the
 body as `Models/ErrorResponse.cs` and throws `BancontactApiException`.
 
-**Important asymmetry, confirmed directly from the raw specs (not assumed):** the Payment API's
-error responses include `traceId`/`spanId` (useful for support tickets); the Refund and
-Reconciliation APIs' `ErrorResponse` schemas define *only* `code`/`message` — those two fields
-aren't in the schema at all outside the Payment API. `ErrorResponse.TraceId`/`SpanId` and
+**Important asymmetry, confirmed directly from the raw specs (not assumed):** the
+[Payment API](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json)'s
+`error` schema includes `traceId`/`spanId` (useful for support tickets); the
+[Refund](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json) and
+[Reconciliation](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json)
+APIs' `ErrorResponse` schemas define *only* `code`/`message` — those two fields aren't in the
+schema at all outside the Payment API. `ErrorResponse.TraceId`/`SpanId` and
 `BancontactApiException.TraceId`/`SpanId` are therefore nullable, and will genuinely be `null`
 for Refund/Reconciliation errors — that's not a parsing failure, it's the correct shape.
 
@@ -158,23 +173,32 @@ These are things that would produce subtly wrong behavior if assumed rather than
 against the raw OpenAPI specs — see [research-notes.md](research-notes.md) for the full list
 and how each was discovered.
 
-- **`totalAmount`**: both the Payment API's `get_payment_response` and the webhook
-  `merchant-callback` schema list `totalAmount` as `required`, but neither schema actually
-  *defines* that property anywhere — a spec bug from an apparent field rename. `Payment` and
-  `MerchantCallback` deliberately have no `TotalAmount` property; bind only to `Amount`.
-- **`ExpiresAt` vs. `ExpireAt`**: `CreatePaymentResponse.ExpiresAt` and `Payment.ExpireAt` are
+- **`totalAmount`** ([Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json),
+  schemas `get_payment_response` and `merchant-callback`): both list `totalAmount` as `required`,
+  but neither schema actually *defines* that property anywhere — a spec bug from an apparent
+  field rename. `Payment` and `MerchantCallback` deliberately have no `TotalAmount` property;
+  bind only to `Amount`.
+- **`ExpiresAt` vs. `ExpireAt`** (same spec, schemas `payment_create_response` vs.
+  `get_payment_response`): `CreatePaymentResponse.ExpiresAt` and `Payment.ExpireAt` are
   genuinely spelled differently in the spec (not the same field renamed) — both are modeled
   as-is rather than normalized to match each other.
-- **The `iss` claim discrepancy**: the Payment and Refund specs hardcode the signing `iss` claim
-  to the literal string `"Payconiq"`; the Reconciliation spec's scheme description instead
-  templates it as `"{Merchant Id}"`. This is exposed as an overridable `Issuer` property on
-  `BancontactProOptions`/`BancontactSigningOptions` (defaulting to `"Payconiq"`) rather than
-  guessed at — it genuinely can't be resolved from documentation alone.
-- **Reconciliation's `size` parameter isn't a range**: the spec sets `size`'s minimum, maximum,
-  *and* default all to `10000` — it's fixed, not a normal 0–10000 page-size choice like the
-  Payment API's search endpoint. `IReconciliationClient` still exposes it as an optional
-  parameter (in case that ever changes) but documents the constraint on the method itself.
-- **Reconciliation responses carry their own `Signature` header** — Bancontact signs its own
+- **The `iss` claim discrepancy**: the
+  [Payment](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json) and
+  [Refund](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json) specs
+  hardcode the signing `iss` claim to the literal string `"Payconiq"`; the
+  [Reconciliation spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json)'s
+  scheme description instead templates it as `"{Merchant Id}"`. This is exposed as an
+  overridable `Issuer` property on `BancontactProOptions`/`BancontactSigningOptions` (defaulting
+  to `"Payconiq"`) rather than guessed at — it genuinely can't be resolved from documentation
+  alone.
+- **Reconciliation's `size` parameter isn't a range**
+  ([Reconciliation API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json),
+  `components.parameters.size`): the spec sets `size`'s minimum, maximum, *and* default all to
+  `10000` — it's fixed, not a normal 0–10000 page-size choice like the Payment API's search
+  endpoint. `IReconciliationClient` still exposes it as an optional parameter (in case that ever
+  changes) but documents the constraint on the method itself.
+- **Reconciliation responses carry their own `Signature` header** (same spec, every 2xx/4xx
+  response declares a `Signature` entry under `headers`) — Bancontact signs its own
   reconciliation API responses, something neither the Payment nor Refund specs do for ordinary
   (non-callback) responses. Not currently verified by `ReconciliationClient` (out of scope for
   the issue that added it); the machinery in `BancontactSignatureVerifier`/`IJwksClient` would
