@@ -15,22 +15,46 @@ OpenAPI specs are the authoritative source for anything not covered here:
   (v3.0.3) — backs `IRefundClient`.
 - [Reconciliation API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-reconciliation.openapi.json)
   (v3.0.1) — backs `IReconciliationClient`.
+- Prose guides, all under the same product family:
+  [Getting Started](https://docs.bancontactpro.com/guides/general/gettingstarted052025v4),
+  [Callback Guide](https://docs.bancontactpro.com/guides/general/callback052025),
+  [Errors, statuses and responses](https://docs.bancontactpro.com/guides/general/errorsandstatuses052025),
+  [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4),
+  [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4),
+  [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4),
+  [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4),
+  [Refunds](https://docs.bancontactpro.com/guides/general/refunds052025),
+  [Reconciliation](https://docs.bancontactpro.com/guides/general/reconciliation052025),
+  [Payout & remittance](https://docs.bancontactpro.com/guides/general/payoutremittance052025).
+
+**Not covered here**: Bancontact also documents an
+[Online Sales](https://docs.bancontactpro.com/guides/online/onlinesales) product (hosted
+checkout / redirect flow, the kind of thing a typical webshop reaches for) — as of this writing
+that page states the product is "no longer offered directly by Bancontact Payconiq Company."
+This library targets the four in-store QR products below instead. The underlying Payment API
+calls are the same either way; what differs is the payment expiry window (see step 6) and which
+`_links` field you're expected to use.
 
 ## 1. Onboarding (do this first — it has a lead time)
 
 Bancontact Pro isn't self-serve. Before you can call anything:
 
 1. **Pre-production**: email [devsupport@bancontact.com](mailto:devsupport@bancontact.com) with
-   your company name, Merchant ID, contact details, and which integration type(s) you need (On a
-   Display, On a Receipt, Static QR, Top Up). Expect up to **two weeks** turnaround. They'll issue
-   a Product Profile ID (PPID) and API key per integration type.
+   your company name, Merchant ID, contact details, and which integration type(s) you need:
+   [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4),
+   [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4),
+   [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4), or
+   [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4). Expect up to **two
+   weeks** turnaround. They'll issue a Product Profile ID (PPID) and API key per integration type.
 2. **Production**: apply via the merchant portal once pre-production is verified working (the
    application portal is separate from the [developer docs](https://docs.bancontactpro.com/) —
    devsupport will point you to it).
 
-You'll also need to generate your own signing key pair (step 2) and share the public half with
-Bancontact during onboarding — they need it before your merchant profile can accept signed
-requests from you.
+Two more things to line up in parallel: generate your own signing key pair (step 2) and share
+the public half with Bancontact during onboarding — they need it before your merchant profile
+can accept signed requests from you — and install the Bancontact Pay test app (see
+[Testing with the Bancontact Pay app](#testing-with-the-bancontact-pay-app) near the end of this
+guide) so you can actually confirm a payment end-to-end once you're wired up.
 
 ## 2. Generate a signing key pair
 
@@ -108,32 +132,41 @@ than failing confusingly later on the first real API call.
 ## 6. Create a payment
 
 Corresponds to `POST /v3/payments` in the
-[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json).
+[Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json) —
+the same operation regardless of which in-store product (On a Display, On a Receipt, Static QR)
+your merchant profile is configured for; what differs per product is the payment's validity
+window and which `_links` field you're expected to render.
 
 ```csharp
-public class CheckoutService(IPaymentClient paymentClient)
+public class PaymentService(IPaymentClient paymentClient)
 {
-    public async Task<string> StartCheckoutAsync(long amountInCents, string orderReference)
+    public async Task<string> CreateAsync(long amountInCents, string orderReference)
     {
         var request = new CreatePaymentRequest(
             Amount: amountInCents,
             Reference: orderReference,
             Description: "Order #" + orderReference);
-            // CallbackUrl/ReturnUrl/IdentifyCallbackUrl are optional -- omitted here, they fall
-            // back to whatever URLs are configured on your merchant profile in the portal.
+            // CallbackUrl/IdentifyCallbackUrl are optional -- omitted here, they fall back to
+            // whatever URLs are configured on your merchant profile in the portal.
 
         var payment = await paymentClient.CreateAsync(request);
 
-        // Either redirect the customer to the hosted checkout page...
-        return payment.Links.Checkout?.Href
-            // ...or render payment.Links.Qrcode.Href yourself if you want a fully custom UI.
-            ?? payment.Links.Qrcode.Href;
+        // Render this as a QR code on your display/receipt/POS -- see the guide for your
+        // specific product for exact rendering parameters (size, format).
+        return payment.Links.Qrcode.Href;
     }
 }
 ```
 
-The response's `PaymentId` is valid for 20 minutes. `Links.Self` is the polling URL (see step
-8) — it is **not** the QR code; `Links.Qrcode` is.
+**The payment's validity window isn't a fixed constant — it's set by your merchant profile's
+configured product.** The
+[On a Display guide](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4) states
+**2 minutes (120 seconds)**; the (discontinued) Online Sales product historically used 20
+minutes. Don't hardcode either figure into your own UX countdown — treat it as configuration, or
+just rely on the payment reaching a terminal status (see step 8) rather than timing it yourself.
+`Links.Self` is the polling URL — it is **not** the QR code; `Links.Qrcode` is. `Links.Checkout`
+is also present on the response, but it's a hosted-checkout-page URL primarily meaningful for
+the discontinued Online Sales product — you likely don't need it for an in-store QR product.
 
 ## 7. Handle the webhook callback
 
@@ -263,6 +296,35 @@ foreach (var payout in payouts.Payouts)
 Filtering by date range instead of payout id is also supported (`startDate`/`endDate`, max 30
 days apart, both required together) — useful if you reconcile on a schedule rather than
 per-payout.
+
+## Testing with the Bancontact Pay app
+
+To actually confirm a pre-production payment end-to-end, you need the Bancontact Pay app
+(details per the
+[Getting Started guide](https://docs.bancontactpro.com/guides/general/gettingstarted052025v4)):
+
+- **Pre-production build**: download via [this form](https://tally.so/r/nP8P1Q) (not the App
+  Store/Play Store build — install only one build at a time; having both installed causes
+  redirection issues).
+- **Production build**: the regular App Store (iOS) / Google Play Store (Android) listing.
+
+Onboarding within the app itself uses a fixed placeholder code — no real OTP is sent:
+
+1. Choose "I don't have itsme", enter your email, then enter code `123456` when prompted (no
+   email is actually sent).
+2. Enter your name, then your phone number (must be an EU number), then code `123456` again
+   (again, no SMS is sent).
+3. Set a PIN, optionally enable biometrics, then add a test card from the table below.
+
+Test cards (all issued by KBC, expiring Nov-29 as of this writing — confirm current values in
+the [Getting Started guide](https://docs.bancontactpro.com/guides/general/gettingstarted052025v4)
+if this has aged):
+
+| Card Number | Expected Result |
+|---|---|
+| `5127 8829 9999 9715` | Always authorized |
+| `5127 8829 9999 9723` | Insufficient funds |
+| `5127 8829 9999 9731` | Card refused by issuer |
 
 ## Error handling summary
 

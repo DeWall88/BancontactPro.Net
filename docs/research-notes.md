@@ -221,8 +221,9 @@ Matches v1 closely; a few exact field names confirmed from the raw spec:
   **resolved 2026-09-17: in scope.** The merchant's preprod onboarding request explicitly
   selected Static QR as one of its integration types, so this isn't hypothetical for this
   project, and the "wrap what the API exposes" scoping principle applies as normal.
-- No test-card/sandbox-simulation details surfaced in any of the fetched pages — still only
-  resolvable once preprod credentials arrive.
+- ~~No test-card/sandbox-simulation details surfaced in any of the fetched pages~~ — **resolved
+  2026-09-17**, see the "Prose guides" section below. Test cards and app setup don't require
+  preprod credentials to find; they were just on a page not fetched until now.
 - **Discovered, not yet acted on (2026-09-17):** every 2xx/4xx response from the Reconciliation
   API declares its own `Signature` response header — Bancontact signs its own reconciliation
   responses, the same detached-JWS scheme used elsewhere. Neither the Payment nor Refund specs
@@ -230,6 +231,87 @@ Matches v1 closely; a few exact field names confirmed from the raw spec:
   out of scope for that issue and not requested — but worth a follow-up issue if
   defense-in-depth response verification is ever wanted, since the machinery from #12/#13
   (JWKS client + `BancontactSignatureVerifier`) would mostly carry over.
+- **Open (2026-09-17):** every prose guide page carries a banner announcing "New payment URLs"
+  tied to "the decommissioning of the Payconiq brand in Belgium," rolling out to production
+  **2026-11-05**. None of the pages checked (getting-started, callback guide,
+  errors-and-statuses, online sales) actually state which hostnames/URLs are changing — the
+  banner is generic across pages and the technical detail doesn't appear to be published yet, or
+  lives somewhere not yet found. **Action before 2026-11-05**: check
+  <https://docs.bancontactpro.com/> again for an updated banner with specifics, or ask
+  devsupport directly — this could affect the hardcoded hostnames in
+  `BancontactProServiceCollectionExtensions` (`merchant.api*.bancontact.net`,
+  `jwks*.bancontact.net`) and the `payconiq.com`-namespaced JOSE header claim URIs, though the
+  latter seem less likely to change since they're identifiers, not fetched URLs.
+
+## Prose guides: real URLs confirmed, and what they add (2026-09-17)
+
+Earlier passes referenced "the getting-started guide," "the callback guide," etc. without exact
+URLs (summarized secondhand, not fetched directly). Confirmed real URLs by fetching
+`https://docs.bancontactpro.com/` and its `.md` sibling and reading the actual navigation:
+
+- [Getting Started](https://docs.bancontactpro.com/guides/general/gettingstarted052025v4)
+- [Callback Guide](https://docs.bancontactpro.com/guides/general/callback052025)
+- [Errors, statuses and responses](https://docs.bancontactpro.com/guides/general/errorsandstatuses052025)
+- [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4)
+- [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4)
+- [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4)
+- [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4)
+- [Invoice](https://docs.bancontactpro.com/guides/invoice/invoice052025v4)
+- [Online Sales](https://docs.bancontactpro.com/guides/online/onlinesales) (see below —
+  discontinued)
+- [Refunds](https://docs.bancontactpro.com/guides/general/refunds052025)
+- [Reconciliation](https://docs.bancontactpro.com/guides/general/reconciliation052025)
+- [Payout & remittance](https://docs.bancontactpro.com/guides/general/payoutremittance052025)
+- [Brand guidelines](https://brand.bancontactpro.com/) (separate site)
+
+Each page is fetchable as raw markdown by appending `.md` to its URL — much more reliable to
+parse than the rendered SPA (same lesson as [[research-verify-against-raw-spec]], now confirmed
+to apply to the prose guides too, not just the OpenAPI JSON).
+
+**Significant finding — Online Sales appears discontinued.** The Online Sales guide (the
+hosted-checkout/redirect flow this project's README originally led with, before 2026-09-17)
+carries this banner: *"Please note that this payment solution is no longer offered directly by
+Bancontact Payconiq Company. If you would still like to use a similar solution in your business
+please contact one of the partners listed here."* None of the in-store guides (On a Display, On
+a Receipt, Static QR, Top Up) carry this notice. The merchant's actual preprod onboarding
+request ([[project-merchant-entity-type]]) was for On a Display / On a Receipt / Static QR / Top
+Up — **not** Online Sales — so this isn't a hypothetical concern for this project; the README
+and getting-started.md have been reframed accordingly (2026-09-17) to lead with the in-store
+products. The underlying `IPaymentClient` operations are unaffected — On a Display's
+implementation guide confirms it uses the exact same `POST/GET/DELETE /v3/payments*` operations
+as Online Sales, just under a different product/PPID configuration.
+
+**Payment validity window is per-product, not a spec constant.** The OpenAPI spec doesn't state
+an expiry at all. On a Display's guide states **2 minutes (120 seconds)**; Online Sales' guide
+stated **20 minutes (1200 seconds)** — the "20 minutes" figure previously in this project's docs
+came from the Online Sales guide specifically and has been corrected. Don't hardcode either
+value; it's merchant-profile configuration, not something derivable from the API responses
+themselves.
+
+**Test cards and pre-production app setup found** (Getting Started guide) — previously flagged
+in this document as unresolvable without credentials, but it turns out this was just on a page
+not yet fetched:
+
+| Issuer | Card Number | Expiry | Expected Result |
+|---|---|---|---|
+| KBC | `5127 8829 9999 9715` | Nov-29 | Always authorized |
+| KBC | `5127 8829 9999 9723` | Nov-29 | Insufficient funds |
+| KBC | `5127 8829 9999 9731` | Nov-29 | Card refused by issuer |
+
+Pre-production Bancontact Pay app build: [download form](https://tally.so/r/nP8P1Q) (separate
+from the production App Store/Play Store build — installing both causes redirection issues).
+In-app onboarding uses fixed placeholder codes (`123456` for both email and phone verification,
+no real OTP sent) — this is by design for the test environment, not a bug to route around.
+
+**JWKS caching guidance confirmed** (Callback Guide) — matches this project's `JwksClient`
+design (refresh-on-miss) without requiring a code change: Bancontact recommends caching JWKS for
+up to **12 hours** and re-fetching on verification failure; a new JWK is added **24 hours**
+before the old one is removed, giving a rotation overlap window. The callback guide's JOSE
+header example also independently confirms the exact claim shape already documented above
+(`crit` array, `https://payconiq.com/{sub,iss,iat,jti,path}`), and is the actual source of the
+`PENDING_MERCHANT_AKNOWLEDGMENT` misspelling flagged earlier in this document — the errors-and-
+statuses guide spells it that way in prose (`AKNOWLEDGMENT`), while the real OpenAPI enum is
+`ACKNOWLEDGEMENT`. Confirmed the misspelling's exact source, not just its existence.
 
 ---
 

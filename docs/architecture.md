@@ -95,7 +95,12 @@ Three layers, each independently testable:
    `SemaphoreSlim`+self-clearing-field approach — that combination has a real race (see the
    commit history around 2026-09-17: a self-clearing in-flight marker can lose to its own field
    assignment when the underlying fetch completes synchronously, which reliably reproduces under
-   parallel test execution even though it's rare in production).
+   parallel test execution even though it's rare in production). This refresh-on-miss strategy
+   lines up with Bancontact's own
+   [callback guide](https://docs.bancontactpro.com/guides/general/callback052025): a new JWK is
+   added 24h before an old one is removed, and Bancontact recommends caching JWKS for up to 12h
+   and re-fetching on verification failure — refreshing reactively on a miss (rather than on a
+   fixed timer) satisfies that without needing a background refresh loop.
 
 2. **`BancontactSignatureVerifier`** does the actual cryptographic and structural verification:
    splits the two segments, parses the JOSE header, rejects any `crit` entry it doesn't
@@ -182,6 +187,15 @@ and how each was discovered.
   `get_payment_response`): `CreatePaymentResponse.ExpiresAt` and `Payment.ExpireAt` are
   genuinely spelled differently in the spec (not the same field renamed) — both are modeled
   as-is rather than normalized to match each other.
+- **The payment validity window is per-product configuration, not a spec constant**: the
+  OpenAPI spec doesn't state a fixed expiry at all — it's set by which product the merchant
+  profile is configured for. The
+  [On a Display guide](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4) states
+  2 minutes; the
+  [Online Sales guide](https://docs.bancontactpro.com/guides/online/onlinesales) (a hosted
+  checkout/redirect product Bancontact currently states is "no longer offered directly") states
+  20 minutes. This library doesn't hardcode either value anywhere — see
+  [getting-started.md](getting-started.md#6-create-a-payment).
 - **The `iss` claim discrepancy**: the
   [Payment](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json) and
   [Refund](https://docs.bancontactpro.com/_bundle/apis/refund-public.openapi.json) specs

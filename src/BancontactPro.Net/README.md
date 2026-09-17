@@ -4,8 +4,17 @@
 [![License: Polyform Noncommercial](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
 
-A strongly-typed **.NET 10** client library for the [Bancontact Pro Merchant Payment API](https://docs.bancontactpro.com/), Belgium's Bancontact/Payconiq payment network. Targets the online-payment flow (create → hosted checkout or self-rendered QR → webhook confirmation, with a polling fallback) used for webshop-style checkouts.
+A strongly-typed **.NET 10** client library for [Bancontact Pro](https://docs.bancontactpro.com/)'s Merchant Payment/Refund/Reconciliation APIs, Belgium's Bancontact/Payconiq payment network. Targets Bancontact's in-store QR products — [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4), [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4), [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4), and [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4) — where the merchant backend creates a payment, renders the resulting QR code (or deep-links to the payer's banking app), and confirms the outcome via a signed webhook with a polling fallback.
 
+> Bancontact's separate **Online Sales** product (a hosted-checkout/redirect flow more typical of
+> webshop checkouts) is marked by Bancontact as
+> ["no longer offered directly"](https://docs.bancontactpro.com/guides/online/onlinesales) as of
+> this writing — it isn't the flow this library is scoped around. The underlying Payment API
+> operations (create/get/cancel/search) are identical either way; only the product configuration,
+> payment expiry window, and recommended rendering differ. See
+> [docs/getting-started.md](https://github.com/DeWall88/BancontactPro.Net/blob/main/docs/getting-started.md)
+> for details.
+>
 > **Status: functionally complete, not yet verified end-to-end against Bancontact.** Request
 > signing, webhook verification, and all three typed API clients (Payment, Refund,
 > Reconciliation) are implemented and unit-tested, with DI registration wired up. What's
@@ -25,8 +34,11 @@ separate API — not clients for Bancontact Pro itself.
 ## Scope
 
 **Payment API** (`IPaymentClient`, [spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json))
-- **Create payment** — `POST /v3/payments`, returns a payment id (valid 20 minutes), a hosted
-  checkout URL, a raw QR-code URL (for a self-rendered checkout page), and a mobile deeplink.
+- **Create payment** — `POST /v3/payments`, returns a payment id, a raw QR-code URL, and a
+  mobile deeplink (plus a hosted checkout URL, mainly relevant to the discontinued Online Sales
+  product). The payment's validity window is set by your merchant profile's configured product,
+  not a fixed constant — e.g. **2 minutes** for On a Display, historically 20 minutes for
+  Online Sales.
 - **Get payment status** — `GET /v3/payments/{id}` — also the recommended polling fallback,
   since callback/redirect ordering isn't guaranteed.
 - **Cancel payment** — `DELETE /v3/payments/{id}` — only while `PENDING`/`IDENTIFIED`.
