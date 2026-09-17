@@ -71,6 +71,11 @@ dotnet add package BancontactPro.Net
 
 ## Usage
 
+The quick version below covers the basics. For onboarding, generating a signing key pair,
+handling webhooks, refunds, and reconciliation in detail, see
+[docs/getting-started.md](docs/getting-started.md). For how the signing/verification internals
+and DI wiring actually work, see [docs/architecture.md](docs/architecture.md).
+
 Configure `BancontactPro` in `appsettings.json` (or another configuration provider — user
 secrets/environment variables are strongly recommended for `PrivateKeyPem` and `ApiKey`):
 
