@@ -1,0 +1,58 @@
+name: NuGet Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: dotnet restore src/BancontactPro.Net/BancontactPro.Net.csproj
+
+      - name: Build
+        run: dotnet build src/BancontactPro.Net/BancontactPro.Net.csproj -c Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/BancontactPro.Net.Tests/BancontactPro.Net.Tests.csproj -c Release
+
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag commit is on main
+        run: |
+          git fetch origin main --depth=1
+          git branch -r --contains "$GITHUB_SHA" | grep -q "origin/main"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Pack
+        run: dotnet pack src/BancontactPro.Net/BancontactPro.Net.csproj -c Release -o ./nupkg
+
+      - name: Push package
+        run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Push symbols
+        run: dotnet nuget push ./nupkg/*.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
