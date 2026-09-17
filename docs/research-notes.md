@@ -231,17 +231,9 @@ Matches v1 closely; a few exact field names confirmed from the raw spec:
   out of scope for that issue and not requested — but worth a follow-up issue if
   defense-in-depth response verification is ever wanted, since the machinery from #12/#13
   (JWKS client + `BancontactSignatureVerifier`) would mostly carry over.
-- **Open (2026-09-17):** every prose guide page carries a banner announcing "New payment URLs"
-  tied to "the decommissioning of the Payconiq brand in Belgium," rolling out to production
-  **2026-11-05**. None of the pages checked (getting-started, callback guide,
-  errors-and-statuses, online sales) actually state which hostnames/URLs are changing — the
-  banner is generic across pages and the technical detail doesn't appear to be published yet, or
-  lives somewhere not yet found. **Action before 2026-11-05**: check
-  <https://docs.bancontactpro.com/> again for an updated banner with specifics, or ask
-  devsupport directly — this could affect the hardcoded hostnames in
-  `BancontactProServiceCollectionExtensions` (`merchant.api*.bancontact.net`,
-  `jwks*.bancontact.net`) and the `payconiq.com`-namespaced JOSE header claim URIs, though the
-  latter seem less likely to change since they're identifiers, not fetched URLs.
+- ~~Every prose guide page carries a "New payment URLs" banner with no specifics~~ — **resolved
+  2026-09-17**, see "Payconiq→Bancontact Pro URL migration" below. The dedicated page wasn't in
+  the navbar list originally captured; the user found it directly.
 
 ## Prose guides: real URLs confirmed, and what they add (2026-09-17)
 
@@ -268,18 +260,18 @@ Each page is fetchable as raw markdown by appending `.md` to its URL — much mo
 parse than the rendered SPA (same lesson as [[research-verify-against-raw-spec]], now confirmed
 to apply to the prose guides too, not just the OpenAPI JSON).
 
-**Significant finding — Online Sales appears discontinued.** The Online Sales guide (the
-hosted-checkout/redirect flow this project's README originally led with, before 2026-09-17)
-carries this banner: *"Please note that this payment solution is no longer offered directly by
-Bancontact Payconiq Company. If you would still like to use a similar solution in your business
-please contact one of the partners listed here."* None of the in-store guides (On a Display, On
-a Receipt, Static QR, Top Up) carry this notice. The merchant's actual preprod onboarding
-request ([[project-merchant-entity-type]]) was for On a Display / On a Receipt / Static QR / Top
-Up — **not** Online Sales — so this isn't a hypothetical concern for this project; the README
-and getting-started.md have been reframed accordingly (2026-09-17) to lead with the in-store
-products. The underlying `IPaymentClient` operations are unaffected — On a Display's
-implementation guide confirms it uses the exact same `POST/GET/DELETE /v3/payments*` operations
-as Online Sales, just under a different product/PPID configuration.
+**Significant finding — Online Sales *and* Invoice appear discontinued.** Both guides carry the
+identical banner: *"Please note that this payment solution is no longer offered directly by
+Bancontact [Payconiq] Company. If you would still like to use a similar solution in your
+business please contact one of the partners listed here."* None of the four guides for the
+products the merchant actually onboarded for (On a Display, On a Receipt, Static QR, Top Up)
+carry this notice. The merchant's actual preprod onboarding request
+([[project-merchant-entity-type]]) matches those four, not Online Sales/Invoice — so this isn't
+a hypothetical concern for this project; the README and getting-started.md have been reframed
+accordingly (2026-09-17) to lead with the in-store products. The underlying `IPaymentClient`
+operations are unaffected — On a Display's implementation guide confirms it uses the exact same
+`POST/GET/DELETE /v3/payments*` operations as Online Sales, just under a different product/PPID
+configuration.
 
 **Payment validity window is per-product, not a spec constant.** The OpenAPI spec doesn't state
 an expiry at all. On a Display's guide states **2 minutes (120 seconds)**; Online Sales' guide
@@ -312,6 +304,46 @@ header example also independently confirms the exact claim shape already documen
 `PENDING_MERCHANT_AKNOWLEDGMENT` misspelling flagged earlier in this document — the errors-and-
 statuses guide spells it that way in prose (`AKNOWLEDGMENT`), while the real OpenAPI enum is
 `ACKNOWLEDGEMENT`. Confirmed the misspelling's exact source, not just its existence.
+
+## Payconiq→Bancontact Pro URL migration — confirmed details (2026-09-17)
+
+The dedicated migration page,
+[Payment link update](https://docs.bancontactpro.com/guides/general/payloadurlupdate) (not
+linked from the navbar the sidebar scrape captured — found by directly guessing/being given the
+slug), gives the actual old→new URL table the generic per-page banners never specified:
+
+| Impacted URL | Before | After |
+|---|---|---|
+| `_links.qrcode.href`'s embedded `c=` target | `https://payconiq.com/pay/2/{transactionId}` | `https://pay.bancontact.net/pay/2/{transactionId}` |
+| `_links.deeplink.href` | `https://payconiq.com/pay/2/{transactionId}` | `https://pay.bancontact.net/pay/2/{transactionId}` |
+| `_links.checkout.href` | `https://checkout.bancontact.net/?...` | `https://pay.bancontact.net/?...` |
+| Static QR / On a Receipt / Top Up / Invoice payload URLs | `https://payconiq.com/t/1/{PPID}?D=...&A=...&R=...` | `https://pay.bancontact.net/t/1/{PPID}?D=...&A=...&R=...` |
+
+The QR-code-image generator host itself (`https://qrcodegenerator.api.bancontact.net/qrcode?...`)
+is **not** changing — only the `c=` payload URL embedded inside it. Already live in
+pre-production; rolls out to production **2026-11-05**. Printed QR codes using the old
+`payconiq.com` URLs keep working only **until 2026-06-15** — after that, old-domain codes may
+stop working, which matters for anything physically printed (Static QR at a till, On a Receipt).
+
+**Quirk to remember**: for the time being, URLs the *API itself* returns in pre-production use
+`pay.acc.bancontact.net`, not the `pay.preprod.bancontact.net` pattern you'd expect by analogy
+with `merchant.api.preprod.bancontact.net` — don't assume a consistent `*.preprod.*` naming
+convention across every Bancontact hostname.
+
+**This also resolves a real functionality gap this project hadn't addressed**: On a Receipt,
+Top Up, and (had it not been discontinued) Invoice never call a REST endpoint to create their
+QR code at all — the merchant builds the QR/deeplink payload URL entirely client-side by
+templating `{host}/t/1/{PPID}?D={description}&A={amountCents}&R={reference}`, then wraps that in
+the QR-image-generator URL. Static QR is subtly different again: the *printed* QR code is a
+one-time "location" link, `{host}/l/1/{PPID}/{POSId}` (no amount at all) — the per-transaction
+amount is attached separately via the already-implemented `POST /v3/payments/pos` call
+(`CreateStaticQrPaymentAsync`), which explains why creating a new static-QR payment for the same
+`posId` invalidates the previous one (see docs/architecture.md's spec-quirks list): the printed
+QR's link never changes, only which pending payment it currently resolves to. None of this is in
+any of the three OpenAPI specs (it's pure URL templating, not an HTTP call), so it was invisible
+to the "verify against the raw spec" pass that scoped issues #2–#7 — it only surfaced once the
+prose guides for the specific products actually onboarded for were read end-to-end. Tracked as a
+new feature: see `BancontactPro.QrCodes.PaymentLinkBuilder`.
 
 ---
 
