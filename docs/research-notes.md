@@ -34,7 +34,6 @@ why `GET /v3/payments/{id}` exists as a required fallback, not an optional nicet
 | Get payment | `GET` | `/v3/payments/{id}` | Polling fallback. Errors: 401 `UNAUTHORIZED`, 403 `ACCESS_DENIED`, 404 `PAYMENT_NOT_FOUND` |
 | List payments | `GET` | `/v3/payments` | Filtered, paginated |
 | Cancel payment | `DELETE` | `/v3/payments/{id}` | Only while `PENDING`/`IDENTIFIED` — 422 `PAYMENT_NOT_PENDING` otherwise |
-| Refund | — | debtor IBAN lookup + `MERCHANT_REFUND` authority | Only once `SUCCEEDED` |
 
 Required create-payment fields (minimum): amount, currency, `CallbackUrl`, `ReturnUrl`.
 Optional: description, order reference (SEPA character-set restrictions apply to both).
@@ -44,12 +43,53 @@ reference) — the online-sales guide separately mentions `PENDING`/`AUTHORIZED`
 webhook payloads specifically; reconcile these against the raw OpenAPI spec, they may be two
 different status vocabularies (payment resource vs. webhook event).
 
+## Endpoints (Refund API)
+
+| Action | Method | Path | Notes |
+|---|---|---|---|
+| Create refund | `POST` | `/v3/payments/{payment-id}/refunds` | Idempotent via an `Idempotency-Key` header. Requires `MERCHANT_REFUND` authority. |
+| Get refund | `GET` | `/v3/payments/{payment-id}/refunds/{refund-id}` | |
+
+Refunds are scoped under the payment they refund (not a top-level resource) — depends on the
+Payment API client existing first. `PROCESSING` status and `DEBTOR_IBAN_NOT_AVAILABLE` error
+code were both **removed** in API v3.0.2 per the changelog note in the spec — don't model
+either. Exact request/response schema (partial vs. full refund support, minimum amount, time
+window after the original payment) not yet confirmed from the excerpts gathered — get this
+from the raw OpenAPI spec.
+
+## Endpoints (Reconciliation API)
+
+Solves a different problem than the two above: matching bank **payouts** (settlement batches)
+against the individual transactions/refunds that make them up — for accounting reconciliation,
+not for the customer-facing payment flow.
+
+| Action | Method | Path | Notes |
+|---|---|---|---|
+| List payouts | `GET` | `/v3/reconciliation/payouts` | By `date` (`YYYY-MM-DD`). Returns settlement batches: payout id, merchant id, IBAN, status (`SUCCEEDED`/`FAILED`), payout date, currency, transaction counts, net amount in cents. |
+| List payments in a payout | `GET` | `/v3/reconciliation/payments` | By `payout-id` or `start-date`/`end-date` (max 30-day range). Only `SUCCEEDED` transactions. Per-record: payment id, merchant name, channel (`ONLINE`/`INSTORE`/`INVOICE`), amount (cents), reference, description, timestamp. |
+| List refunds in a payout | `GET` | `/v3/reconciliation/refunds` | Same shape/filters as payments, above. Only `SUCCEEDED` refunds. |
+
+- Pagination: `size` (default 10000), `page` (default 0) on all three.
+- **Data availability: D+1 starting at 09:00 CET** — not real-time, don't design around
+  polling this frequently or expecting same-day data.
+- JSON only, no CSV/file export.
+- Exists in both PREPROD and PROD.
+
 ## Authentication
 
 - Bearer API key in the `Authorization` header for every call.
-- **Plus** a detached JWS request signature (RFC 7797) in a
-  `JWS-Request-Signature-Payment` header — this is not optional, and not a common pattern
-  among mainstream PSPs (Mollie/Stripe use a bearer key alone).
+- **Plus** a detached JWS request signature (RFC 7797). Header name seen as
+  `JWS-Request-Signature-Payment` in the Payment API docs and plain `Signature` in the Refund
+  API docs — confirm whether this is a real per-API-family difference or just inconsistent
+  documentation before assuming either is authoritative.
+- The JOSE header for request signing includes merchant profile ID, timestamp, a unique
+  request identifier, and the request path.
+- **Important, easy to miss**: this is a *two-directional* JWKS relationship, not one.
+  Verifying *webhooks* uses Bancontact's JWKS (see below). Signing *requests* is the other way
+  around — **the merchant must host their own public key(s) in JWKS format and share that URL
+  with Bancontact** during onboarding, so Bancontact can verify the merchant's request
+  signatures. This means the library (or its consumer) needs a way to publish a JWKS endpoint,
+  not just sign outgoing requests — a real infrastructure requirement, not just a code path.
 - Auth model terms seen in the API: `subjectType` (`INTEGRATOR`/`MERCHANT`), `resource`
   (`PAYMENTPROFILE`), `authority` (`MERCHANT_PAYMENT`/`MERCHANT_REFUND`) — suggests a
   permission-scoped design, possibly aimed as much at PSPs/ISVs integrating on behalf of many

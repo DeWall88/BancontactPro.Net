@@ -20,17 +20,31 @@ turn up when searching (`CM.Payments.SDK`, `paynl/bancontact-sdk`) are for *othe
 gateways that merely support Bancontact as one of several payment methods through their own
 separate API — not clients for Bancontact Pro itself.
 
-## Planned scope (Payment V3 API)
+## Planned scope
 
+**Payment API**
 - **Create payment** — `POST /v3/payments`, returns a payment id (valid 20 minutes), a hosted
   checkout URL, a raw QR-code URL (for a self-rendered checkout page), and a mobile deeplink.
 - **Get payment status** — `GET /v3/payments/{id}` — also the recommended polling fallback,
   since callback/redirect ordering isn't guaranteed.
 - **Cancel payment** — `DELETE /v3/payments/{id}` — only while `PENDING`/`IDENTIFIED`.
-- **Refund** — via the debtor IBAN lookup + refund authority (`MERCHANT_REFUND`), only once a
-  payment is `SUCCEEDED`.
-- **Request signing** — every API call needs a detached JWS signature (RFC 7797,
-  `JWS-Request-Signature-Payment` header) alongside the bearer API key.
+
+**Refund API**
+- **Create refund** — `POST /v3/payments/{payment-id}/refunds` (idempotent via an
+  `Idempotency-Key` header, requires `MERCHANT_REFUND` authority).
+- **Get refund** — `GET /v3/payments/{payment-id}/refunds/{refund-id}`.
+
+**Reconciliation API** — matching bank payouts against the transactions/refunds behind them,
+for accounting rather than the customer-facing flow. Data is only available D+1 09:00 CET.
+- **List payouts** — `GET /v3/reconciliation/payouts`
+- **List payments in a payout** — `GET /v3/reconciliation/payments`
+- **List refunds in a payout** — `GET /v3/reconciliation/refunds`
+
+**Cross-cutting**
+- **Request signing** — every API call needs a detached JWS signature (RFC 7797) alongside the
+  bearer API key. This is two-directional: verifying webhooks uses Bancontact's JWKS, but
+  *signing requests* requires the merchant to host their own JWKS for Bancontact to verify
+  against — a real infrastructure requirement, not just a code path.
 - **Webhook verification** — callbacks are JWS-signed (ES256) against a rotating JWKS
   (`jwks.bancontact.net` prod / `jwks.preprod.bancontact.net` preprod), not a shared-secret
   HMAC. Retried for up to 24h on non-200/timeout; each callback carries a unique `jti`.
