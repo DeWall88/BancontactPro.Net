@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/docs/">
+    <File Path="docs/research-notes.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/BancontactPro.Net/BancontactPro.Net.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BancontactPro.Net.Tests/BancontactPro.Net.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,61 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>$(MSBuildProjectName.Replace(" ", "_").Replace(".Net",""))</RootNamespace>
+
+    <!-- Package identity -->
+    <PackageId>BancontactPro.Net</PackageId>
+    <!-- Version is derived automatically from git tags by MinVer (tag format: v0.1.2) -->
+    <Authors>DeWall88</Authors>
+    <Copyright>© 2026 DeWall88</Copyright>
+    <Description>A strongly-typed .NET 10 client library for the Bancontact Pro Merchant Payment API (online payments: create, status, cancel), including JWS request signing and JWKS-verified webhook callbacks, with built-in DI registration and full IntelliSense documentation.</Description>
+    <PackageReleaseNotes>Initial scaffold — targets Bancontact Pro's Payment V3 API.</PackageReleaseNotes>
+    <PackageTags>bancontact;bancontactpro;payconiq;payments;belgium;client;webhooks;jws</PackageTags>
+
+    <!-- Repository and project links -->
+    <PackageProjectUrl>https://github.com/DeWall88/BancontactPro.Net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DeWall88/BancontactPro.Net</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <!-- License -->
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
+
+    <!-- README shown on NuGet.org -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Emit the XML doc file so consumers get IntelliSense tooltips -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- Symbol package for source-stepping in debuggers -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Reproducible builds -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- Treat missing XML doc comments as build errors -->
+    <WarningsAsErrors>CS1591</WarningsAsErrors>
+
+    <!-- MinVer configuration -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>dev</MinVerDefaultPreReleaseIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
