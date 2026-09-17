@@ -266,3 +266,8 @@ If *Bancontact the payment method* (rather than *Bancontact Pro the platform spe
 ever the actual requirement, [Mollie](https://www.nuget.org/packages/Mollie.Api) has a mature
 official .NET SDK with Bancontact support and a meaningfully simpler auth model (bearer key +
 webhook secret, no JWS/JWKS). Noted here as a known trade-off, not a recommendation to switch.
+
+**Not actually an option for this project**: the merchant here (Old Skool Lan) is a Belgian
+*feitelijke vereniging* (unincorporated association). Mollie doesn't onboard unincorporated
+associations; Bancontact Pro does. The simpler auth model above is moot — Mollie was never a
+real alternative for this specific merchant, regardless of the JWS/JWKS complexity trade-off.
