@@ -31,6 +31,22 @@ public class HttpResponseMessageExtensionsTests
     }
 
     [Fact]
+    public async Task EnsureBancontactSuccessAsync_RefundOrReconciliationShapedError_ThrowsWithNullTraceAndSpanId()
+    {
+        // Refund and Reconciliation specs' ErrorResponse only defines code/message -- no traceId/spanId at all.
+        using var response = new HttpResponseMessage(HttpStatusCode.UnprocessableEntity)
+        {
+            Content = new StringContent("""{"code":"REFUND_NOT_ALLOWED","message":"not allowed"}"""),
+        };
+
+        var ex = await Assert.ThrowsAsync<BancontactApiException>(() => response.EnsureBancontactSuccessAsync());
+
+        Assert.Equal("REFUND_NOT_ALLOWED", ex.Code);
+        Assert.Null(ex.TraceId);
+        Assert.Null(ex.SpanId);
+    }
+
+    [Fact]
     public async Task EnsureBancontactSuccessAsync_NonJsonBody_FallsBackWithoutThrowingJsonException()
     {
         using var response = new HttpResponseMessage(HttpStatusCode.BadGateway)

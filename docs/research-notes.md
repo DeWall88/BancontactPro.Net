@@ -173,9 +173,13 @@ generic `400`, `401`, `403`, `500`, `503`.
 **Reconciliation API**: `400 BAD_REQUEST`, `401 UNAUTHORIZED`, `403 ACCESS_DENIED`,
 `404 PAYOUT_NOT_FOUND` (payments/refunds endpoints only), `500 TECHNICAL_ERROR`, `503`.
 
-All error responses share one shape across all three specs (`ErrorResponse`):
-`{ code, message, traceId, spanId }` — all four required. `traceId`/`spanId` weren't mentioned
-in v1 at all; useful to surface in exceptions for support requests.
+**Correction (2026-09-17, re-verified against the raw Refund/Reconciliation specs directly):**
+the error shape is *not* identical across all three APIs as originally stated here. Only the
+Payment API's `ErrorResponse` schema has `{ code, message, traceId, spanId }` (all four
+required). The Refund and Reconciliation specs' own `ErrorResponse` schemas define only
+`{ code, message }` — `traceId`/`spanId` aren't in those schemas at all, not just optional.
+Model `TraceId`/`SpanId` as nullable and don't assume they'll be populated outside the Payment
+API.
 
 ## Confirmed: Refund API schema (resolves v1's biggest unknown)
 
