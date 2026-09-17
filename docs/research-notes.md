@@ -213,8 +213,10 @@ Matches v1 closely; a few exact field names confirmed from the raw spec:
 
 - The `iss` claim discrepancy (Payment/Refund hardcode `"Payconiq"`, Reconciliation templates
   `"{Merchant Id}"`) — needs a direct question to devsupport, can't be resolved from docs alone.
-- Whether `/v3/payments/pos` (static QR / in-person) is in scope for this wrapper — a product
-  scoping decision, not a technical unknown.
+- ~~Whether `/v3/payments/pos` (static QR / in-person) is in scope for this wrapper~~ —
+  **resolved 2026-09-17: in scope.** The merchant's preprod onboarding request explicitly
+  selected Static QR as one of its integration types, so this isn't hypothetical for this
+  project, and the "wrap what the API exposes" scoping principle applies as normal.
 - No test-card/sandbox-simulation details surfaced in any of the fetched pages — still only
   resolvable once preprod credentials arrive.
 
