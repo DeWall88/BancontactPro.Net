@@ -125,3 +125,8 @@ whatever JWKS URL the merchant registers. This library doesn't host that endpoin
 Implementation work is tracked as issues in this repo. See
 [docs/research-notes.md](docs/research-notes.md) for the API research this scaffold was built
 from.
+
+## Development
+
+Built with AI pair-programming assistance from Claude Sonnet 5 (Anthropic) — commits are
+co-authored accordingly.

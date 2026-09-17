@@ -127,3 +127,8 @@ Implementation work is tracked as issues on
 [GitHub](https://github.com/DeWall88/BancontactPro.Net/issues). See
 [docs/research-notes.md](https://github.com/DeWall88/BancontactPro.Net/blob/main/docs/research-notes.md)
 for the API research this library was built from.
+
+## Development
+
+Built with AI pair-programming assistance from Claude Sonnet 5 (Anthropic) — commits are
+co-authored accordingly.
