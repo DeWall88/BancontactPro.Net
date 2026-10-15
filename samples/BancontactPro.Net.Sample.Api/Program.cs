@@ -235,8 +235,15 @@ public static class SampleEndpoints
         catch (BancontactApiException ex)
         {
             // Bancontact's own status, code and trace IDs, as it sent them: the trace and span IDs are what its support asks for.
-            return Results.Problem(ex.Message, statusCode: (int)ex.StatusCode, title: $"Bancontact returned {(int)ex.StatusCode} {ex.Code}".TrimEnd(),
-                extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = ex.TraceId, ["spanId"] = ex.SpanId });
+            var extensions = new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = ex.TraceId, ["spanId"] = ex.SpanId };
+            if (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                // The usual cause: the product's API key and PPID look alike and are easily swapped.
+                extensions["hint"] = "Bancontact did not accept this product's API key. Check BancontactPro:Products:<Product>:ApiKey " +
+                                     "is the API key (not the PPID) from that product's entry, for this environment.";
+            }
+
+            return Results.Problem(ex.Message, statusCode: (int)ex.StatusCode, title: $"Bancontact returned {(int)ex.StatusCode} {ex.Code}".TrimEnd(), extensions: extensions);
         }
         catch (HttpRequestException ex)
         {

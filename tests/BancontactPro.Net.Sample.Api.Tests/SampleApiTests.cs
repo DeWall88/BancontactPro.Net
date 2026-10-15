@@ -259,6 +259,22 @@ public sealed class SampleApiTests : IClassFixture<SampleApiTests.SampleApiFacto
         Assert.Equal("Invalid API key", problem.RootElement.GetProperty("detail").GetString());
         Assert.Equal("trace-1", problem.RootElement.GetProperty("traceId").GetString());
         Assert.Equal("span-1", problem.RootElement.GetProperty("spanId").GetString());
+        Assert.Contains("not the PPID", problem.RootElement.GetProperty("hint").GetString());
+    }
+
+    // What preprod actually returns for an unknown API key: not Bancontact's {code, message} shape.
+    [Fact]
+    public async Task BancontactUnauthorizedInGatewayShape_KeepsTheBodyAndHints()
+    {
+        _factory.Bancontact.NextStatus = HttpStatusCode.Unauthorized;
+        _factory.Bancontact.NextBody = """{"timestamp":"2026-10-15T21:27:32.898Z","path":"/v3/payments","status":401,"error":"Unauthorized","requestId":"r-1"}""";
+
+        var response = await Client().PostAsync("/OnDisplay/v3/payments", Json("""{"amount":100}"""));
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("\"requestId\":\"r-1\"", problem.RootElement.GetProperty("detail").GetString());
+        Assert.True(problem.RootElement.TryGetProperty("hint", out _));
     }
 
     [Fact]

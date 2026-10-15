@@ -437,12 +437,31 @@ if this has aged):
 
 | Exception | Thrown by | When |
 |---|---|---|
-| `BancontactApiException` | any client method | Bancontact returned a non-success HTTP status. Carries `StatusCode`, `Code`, `Message`, and (Payment API only) `TraceId`/`SpanId` for support requests. |
+| `BancontactApiException` | any client method | Bancontact returned a non-success HTTP status. Carries `StatusCode`, `Code`, `Message`, and (Payment API only) `TraceId`/`SpanId` for support requests. A body that isn't Bancontact's `{code, message}` shape (e.g. a gateway's 401) is kept verbatim in `Message`. |
 | `RefundIdempotencyConflictException` | `IRefundClient.CreateAsync` | The `Idempotency-Key` was reused with different refund parameters — a caller bug, not transient. |
 | `InvalidCallbackException` | `BancontactCallbackVerifier.VerifyAndParseAsync` | The callback's signature didn't verify, or its body didn't match the expected schema. |
 | `OptionsValidationException` | first access of `BancontactProOptions` | No product is configured, a product has only half its API key and PPID pair, only half of the signing key (`Kid`/`PrivateKeyPem`) is set, or `PrivateKeyPem` isn't a parseable PEM-encoded EC key. |
 | `BancontactProductNotConfiguredException` | `IBancontactClientFactory.Payments`/`Refunds`/`Reconciliation` | The product has no complete API key and PPID pair. `Product` says which one. |
 | `BancontactSigningKeyNotConfiguredException` | `IBancontactClientFactory.Refunds`/`Reconciliation` | No signing key is configured. Those APIs accept only signed requests. |
+
+### 401 Unauthorized from Bancontact
+
+Bancontact doesn't recognise the API key. In order of likelihood:
+
+1. **The API key and the PPID are swapped.** They look alike. In a successful create-payment
+   response the PPID comes back as `creditor.profileId`, which tells you which of the two values is
+   the PPID.
+2. **The key belongs to another product or environment.** Each product has its own key, and
+   preprod and production keys differ.
+3. **The key was copied with hidden characters** (a non-breaking or zero-width space from an
+   HTML email).
+
+To test a key on its own, ask for a payment that doesn't exist. The key is fine if the answer is
+404 `PAYMENT_NOT_FOUND`, and wrong if it is 401:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Authorization: Bearer <API key>' https://merchant.api.preprod.bancontact.net/v3/payments/probe
+```
 
 See [architecture.md](architecture.md#error-handling) for why `TraceId`/`SpanId` aren't always
 populated.

@@ -54,11 +54,26 @@ getting-started guide's onboarding list also mentions "a unique API key and/or J
 in the specs has Bancontact issue a private key, so that phrase is unresolved. Ask devsupport if
 one arrives.
 
-**Open (2026-10-15): the Authorization header format.** The OpenAPI scheme describes "Bearer
-authentication with API Key", and the library sends `Authorization: Bearer {apiKey}`. The product
-guides' curl examples send the bare key instead (`Authorization: YOUR_API_KEY_HERE`). The first
-preprod call will tell which one Bancontact accepts: the sample API passes Bancontact's status and
-error code through.
+**Confirmed on preprod (2026-10-15): `Authorization: Bearer {apiKey}` works.** The OpenAPI scheme
+describes "Bearer authentication with API Key"; the product guides' curl examples send the bare key
+(`Authorization: YOUR_API_KEY_HERE`). A real `POST /v3/payments` with the library's `Bearer` header
+created a payment. There is no token step: the API key *is* the bearer value (no OAuth or token
+endpoint exists in any of the three specs). Whether the bare key is also accepted is untested.
+
+**Observed on preprod (2026-10-15):**
+
+- An unknown API key gets a 401 whose body is *not* the documented `{code, message}` shape but a
+  gateway error: `{"timestamp", "path", "status": 401, "error": "Unauthorized", "requestId"}`.
+  The library keeps such bodies verbatim in `BancontactApiException.Message`.
+- The PPID and the API key look alike (both short random strings). A swapped pair is the first
+  thing to check on a 401: the create-payment response echoes the PPID as `creditor.profileId`.
+- A per-payment `callbackUrl` is accepted and echoed in `creditor.callbackUrl`.
+- Preprod payment links use other hosts than production: `_links.deeplink` is on
+  `pay.acc.bancontact.net` and `_links.qrcode` on `qrcodegenerator.api.preprod.bancontact.net`.
+  `PaymentLinkBuilder` currently always builds the production hosts (`pay.bancontact.net`,
+  `qrcodegenerator.api.bancontact.net`), so locally built QR codes don't target preprod yet.
+- Timestamps come with microseconds and a `+00:00` offset (`2026-10-15T21:34:07.729375+00:00`),
+  not the `.sssZ` the spec shows; `DateTimeOffset` parses both.
 
 **Also confirmed by the guides (2026-10-15):** optional request fields are optional, not nullable
 (`currency` "defaults to EUR", URLs "default to the one set in the profile"), so the library
