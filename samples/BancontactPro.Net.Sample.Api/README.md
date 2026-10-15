@@ -22,6 +22,8 @@ It does not depend on any other project. Payments are kept **in memory** (a rest
 
 The callback URL Bancontact must call is `PUBLIC_BASE_URL` + `/bancontact/callback`. The signature covers the request path, so the proxy in front must not rewrite it.
 
+**Postman:** import [`BancontactPro.Net.Sample.Api.postman_collection.json`](BancontactPro.Net.Sample.Api.postman_collection.json) for all of the above, plus checks that a public deployment refuses calls without the key or the signature. Set the collection variables `baseUrl` and `sampleKey`; put the key in *Current value* only, so it isn't saved into exports. The create requests remember the new payment's ID for Get and Cancel.
+
 ## Where Bancontact's credentials go
 
 Bancontact's onboarding email gives **one API key and one PPID per product**. Each pair goes into that product's two variables:

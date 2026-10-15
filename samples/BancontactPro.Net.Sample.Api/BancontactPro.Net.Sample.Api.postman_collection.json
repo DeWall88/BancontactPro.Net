@@ -1,0 +1,231 @@
+{
+  "info": {
+    "name": "BancontactPro.Net Sample API",
+    "description": "Calls for the BancontactPro.Net sample API (samples/BancontactPro.Net.Sample.Api).\n\nBefore use, set the collection variables (collection → Variables):\n- baseUrl: where the sample runs, e.g. http://localhost:8085 or your public HTTPS address.\n- sampleKey: the SAMPLE_API_KEY you configured. Put it in Current value only, so it isn't saved in exports.\n\nThe create requests store the new payment's ID in paymentId, so Get and Cancel act on the last payment created.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "X-Sample-Key", "type": "string" },
+      { "key": "value", "value": "{{sampleKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8085", "type": "string" },
+    { "key": "sampleKey", "value": "", "type": "string" },
+    { "key": "paymentId", "value": "", "type": "string" },
+    { "key": "posId", "value": "till-1", "type": "string" },
+    { "key": "amount", "value": "100", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "GET",
+        "url": "{{baseUrl}}/health",
+        "description": "Liveness check. No key needed."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('status is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Create payment: On Display",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"OnDisplay\",\n  \"amount\": {{amount}},\n  \"description\": \"Test payment\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a payment with the On Display product's credentials. amount is in cents. Open qrCodeUrl in the response to scan it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "if (body.paymentId) { pm.collectionVariables.set('paymentId', body.paymentId); }",
+                  "pm.test('payment is PENDING', () => pm.expect(body.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create payment: Static QR",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"StaticQr\",\n  \"amount\": {{amount}},\n  \"description\": \"Test payment\",\n  \"posId\": \"{{posId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a Static QR payment for the point of sale in posId, with the Static QR product's credentials."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "if (body.paymentId) { pm.collectionVariables.set('paymentId', body.paymentId); }",
+                  "pm.test('payment is PENDING', () => pm.expect(body.status).to.eql('PENDING'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create payment: other product",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/payments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product\": \"TopUp\",\n  \"amount\": {{amount}},\n  \"description\": \"Test payment\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Same call for any product: OnDisplay, OnReceipt, StaticQr, TopUp or Invoice. A product without its API key and PPID configured returns 400 naming the missing settings, and nothing is sent to Bancontact."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) { pm.collectionVariables.set('paymentId', pm.response.json().paymentId); }",
+                  "pm.test('201 Created, or 400 for an unconfigured product', () => pm.expect(pm.response.code).to.be.oneOf([201, 400]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get payment (stored)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/payments/{{paymentId}}",
+            "description": "The status as the sample last stored it, from the create call or a callback."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get payment (refresh from Bancontact)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/payments/{{paymentId}}?refresh=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["payments", "{{paymentId}}"],
+              "query": [{ "key": "refresh", "value": "true" }]
+            },
+            "description": "Asks Bancontact for the current status first: the fallback for a late or lost callback."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('200 OK', () => pm.response.to.have.status(200));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cancel payment",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/payments/{{paymentId}}",
+            "description": "Cancels a pending payment at Bancontact. Only works while it is still PENDING."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('204 No Content', () => pm.response.to.have.status(204));"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Security checks",
+      "description": "Requests that must be refused. Run them against a public deployment to confirm it is locked down.",
+      "item": [
+        {
+          "name": "Payments without the key → 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}/payments/anything"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unsigned callback → 401",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/bancontact/callback",
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } },
+            "description": "Only Bancontact can produce a valid Signature header, so a hand-made callback is always rejected."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
