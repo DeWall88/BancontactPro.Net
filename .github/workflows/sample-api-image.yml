@@ -1,0 +1,85 @@
+name: Sample API Image
+
+# Builds the sample API's Docker image and publishes it to GitHub Container Registry, so a host
+# (e.g. a Portainer stack) only pulls and runs it and never has to build. Publishes on pushes to
+# main that touch the library or the sample, and on demand.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'samples/**'
+      - 'tests/**'
+      - '.dockerignore'
+      - '.github/workflows/sample-api-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Test library
+        run: dotnet test tests/BancontactPro.Net.Tests/BancontactPro.Net.Tests.csproj -c Release
+
+      - name: Test sample API
+        run: dotnet test tests/BancontactPro.Net.Sample.Api.Tests/BancontactPro.Net.Sample.Api.Tests.csproj -c Release
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # GHCR image names must be lowercase; the repository owner may not be.
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/bancontactpro-sample-api" >> "$GITHUB_ENV"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # :latest is what the compose file pulls; :sha-<short> pins an exact build for rollbacks.
+      # The OCI labels link the package to this repository on GitHub.
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: samples/BancontactPro.Net.Sample.Api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

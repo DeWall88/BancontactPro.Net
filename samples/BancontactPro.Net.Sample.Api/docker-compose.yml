@@ -1,13 +1,14 @@
 # The sample API as a Portainer stack (or `docker compose up -d` from the repository root:
-#   docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d --build).
+#   docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d).
 # Set the variables below in Portainer's stack environment; the .env.example next to this file lists them,
 # and the sample's README maps each credential from Bancontact's onboarding email to its variable.
+#
+# The image is prebuilt by GitHub Actions (.github/workflows/sample-api-image.yml) and pulled from
+# GitHub Container Registry, so the host never builds: Portainer's own Docker connection can't run
+# BuildKit builds. Point SAMPLE_API_IMAGE at another tag (e.g. :sha-abc1234, or a local build) to override.
 services:
   sample-api:
-    image: ${SAMPLE_API_IMAGE:-bancontactpro-sample-api:latest}
-    build:
-      context: ../..
-      dockerfile: samples/BancontactPro.Net.Sample.Api/Dockerfile
+    image: ${SAMPLE_API_IMAGE:-ghcr.io/dewall88/bancontactpro-sample-api:latest}
     restart: unless-stopped
     ports:
       # The Cloudflare tunnel route points at this host port.
