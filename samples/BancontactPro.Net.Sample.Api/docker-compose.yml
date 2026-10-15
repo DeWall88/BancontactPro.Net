@@ -1,0 +1,39 @@
+# The sample API as a Portainer stack (or `docker compose up -d` from the repository root:
+#   docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d --build).
+# Set the variables below in Portainer's stack environment; the .env.example next to this file lists them,
+# and the sample's README maps each credential from Bancontact's onboarding email to its variable.
+services:
+  sample-api:
+    image: ${SAMPLE_API_IMAGE:-bancontactpro-sample-api:latest}
+    build:
+      context: ../..
+      dockerfile: samples/BancontactPro.Net.Sample.Api/Dockerfile
+    restart: unless-stopped
+    ports:
+      # The Cloudflare tunnel route points at this host port.
+      - "${SAMPLE_API_PORT:-8085}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      # The hostname Bancontact reaches the app at (the Cloudflare hostname), no trailing slash.
+      PublicBaseUrl: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the Cloudflare hostname, e.g. https://bancontact-preprod.example.com}
+      # Shared key for the /payments endpoints (X-Sample-Key header). Without it they refuse everything.
+      SampleApiKey: ${SAMPLE_API_KEY:?set SAMPLE_API_KEY to a long random string}
+      BancontactPro__Environment: ${BANCONTACT_ENVIRONMENT:-Preprod}
+
+      # One API key + PPID pair per product, both from that product's entry in Bancontact's email.
+      # Fill in the products you have; leave the others empty. At least one pair is required, and a
+      # product with only one of its two values set stops the app at startup.
+      BancontactPro__Products__StaticQr__ApiKey: ${BANCONTACT_STATICQR_API_KEY:-}
+      BancontactPro__Products__StaticQr__MerchantProfileId: ${BANCONTACT_STATICQR_PPID:-}
+      BancontactPro__Products__OnDisplay__ApiKey: ${BANCONTACT_ONDISPLAY_API_KEY:-}
+      BancontactPro__Products__OnDisplay__MerchantProfileId: ${BANCONTACT_ONDISPLAY_PPID:-}
+      BancontactPro__Products__OnReceipt__ApiKey: ${BANCONTACT_ONRECEIPT_API_KEY:-}
+      BancontactPro__Products__OnReceipt__MerchantProfileId: ${BANCONTACT_ONRECEIPT_PPID:-}
+      BancontactPro__Products__TopUp__ApiKey: ${BANCONTACT_TOPUP_API_KEY:-}
+      BancontactPro__Products__TopUp__MerchantProfileId: ${BANCONTACT_TOPUP_PPID:-}
+      BancontactPro__Products__Invoice__ApiKey: ${BANCONTACT_INVOICE_API_KEY:-}
+      BancontactPro__Products__Invoice__MerchantProfileId: ${BANCONTACT_INVOICE_PPID:-}
+
+      # Optional: your own signing key, only for the Refund and Reconciliation APIs. Leave both empty for payments.
+      BancontactPro__Kid: ${BANCONTACT_KID:-}
+      BancontactPro__PrivateKeyPem: ${BANCONTACT_PRIVATE_KEY_PEM:-}
