@@ -60,6 +60,39 @@ public class HttpResponseMessageExtensionsTests
         Assert.Contains("502", ex.Message);
     }
 
+    // Seen on preprod: a 401 whose JSON body isn't Bancontact's {code, message} shape. It used to deserialize
+    // into an all-null ErrorResponse and surface as "Exception of type ... was thrown", hiding the body.
+    [Fact]
+    public async Task EnsureBancontactSuccessAsync_JsonBodyOfAnotherShape_KeepsTheRawBody()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("""{"error":"invalid_token","error_description":"The access token is invalid"}"""),
+        };
+        response.Headers.WwwAuthenticate.ParseAdd("Bearer error=\"invalid_token\"");
+
+        var ex = await Assert.ThrowsAsync<BancontactApiException>(() => response.EnsureBancontactSuccessAsync());
+
+        Assert.Equal(HttpStatusCode.Unauthorized, ex.StatusCode);
+        Assert.Equal("", ex.Code);
+        Assert.Contains("The access token is invalid", ex.Message);
+        Assert.Contains("WWW-Authenticate: Bearer error=\"invalid_token\"", ex.Message);
+    }
+
+    [Fact]
+    public async Task EnsureBancontactSuccessAsync_CodeWithoutMessage_UsesTheBody()
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent("""{"code":"ACCESS_DENIED"}"""),
+        };
+
+        var ex = await Assert.ThrowsAsync<BancontactApiException>(() => response.EnsureBancontactSuccessAsync());
+
+        Assert.Equal("ACCESS_DENIED", ex.Code);
+        Assert.Contains("ACCESS_DENIED", ex.Message);
+    }
+
     [Fact]
     public async Task EnsureBancontactSuccessAsync_EmptyBody_FallsBackGracefully()
     {
