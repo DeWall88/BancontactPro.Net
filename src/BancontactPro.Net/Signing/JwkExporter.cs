@@ -45,10 +45,10 @@ public static class JwkExporter
     {
         var parameters = key.ExportParameters(includePrivateParameters: false);
 
-        if (parameters.Curve.Oid.FriendlyName != ECCurve.NamedCurves.nistP256.Oid.FriendlyName)
+        if (!IsP256(parameters.Curve))
         {
             throw new NotSupportedException(
-                $"Only P-256 (ES256) keys are supported; got curve '{parameters.Curve.Oid.FriendlyName}'.");
+                $"Only P-256 (ES256) keys are supported; got curve '{parameters.Curve.Oid?.FriendlyName ?? parameters.Curve.Oid?.Value}'.");
         }
 
         var jwk = new PublicJwk
@@ -60,4 +60,17 @@ public static class JwkExporter
 
         return JsonSerializer.Serialize(jwk);
     }
+
+    /// <summary>The OID of NIST P-256 (secp256r1 / prime256v1).</summary>
+    private const string P256Oid = "1.2.840.10045.3.1.7";
+
+    /// <summary>
+    /// Whether <paramref name="curve"/> is P-256. The OID is the reliable check: the friendly name
+    /// depends on the platform's crypto library (<c>nistP256</c> on Windows, <c>ECDSA_P256</c> with
+    /// OpenSSL on Linux), so names are only a fallback for when no OID value is reported.
+    /// </summary>
+    internal static bool IsP256(ECCurve curve) =>
+        curve.IsNamed
+        && (curve.Oid.Value == P256Oid
+            || curve.Oid.FriendlyName is "nistP256" or "ECDSA_P256" or "secp256r1" or "prime256v1");
 }
