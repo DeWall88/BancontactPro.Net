@@ -1,7 +1,7 @@
 name: Sample API Image
 
-# Builds the sample API's Docker image and publishes it to GitHub Container Registry, so a host
-# (e.g. a Portainer stack) only pulls and runs it and never has to build. Publishes on pushes to
+# Builds the sample API's Docker image and publishes it to GitHub Container Registry, so whatever
+# runs it (plain docker compose, a container manager, ...) only pulls and never has to build. Publishes on pushes to
 # main that touch the library or the sample, and on demand.
 on:
   push:

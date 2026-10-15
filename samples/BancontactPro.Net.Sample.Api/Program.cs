@@ -66,7 +66,7 @@ public static class SampleEndpoints
         {
             var client = clients.Payments(body.Product);
 
-            // PublicBaseUrl is the address Bancontact reaches the app at (the Cloudflare hostname). Behind a tunnel the request's own
+            // PublicBaseUrl is the public address Bancontact reaches the app at. Behind a reverse proxy or tunnel the request's own
             // scheme and host are the internal ones, so they are only the fallback for local runs.
             var publicBaseUrl = config["PublicBaseUrl"]?.TrimEnd('/') ?? $"{http.Request.Scheme}://{http.Request.Host}";
             var callbackUrl = $"{publicBaseUrl}{CallbackPath}";

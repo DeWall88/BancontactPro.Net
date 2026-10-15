@@ -1,22 +1,22 @@
-# The sample API as a Portainer stack (or `docker compose up -d` from the repository root:
-#   docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d).
-# Set the variables below in Portainer's stack environment; the .env.example next to this file lists them,
+# The sample API for any Docker host. From the repository root:
+#   docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d
+# or as a stack in a container manager (Portainer, Dockge, ...). The .env.example next to this file lists the variables,
 # and the sample's README maps each credential from Bancontact's onboarding email to its variable.
 #
 # The image is prebuilt by GitHub Actions (.github/workflows/sample-api-image.yml) and pulled from
-# GitHub Container Registry, so the host never builds: Portainer's own Docker connection can't run
-# BuildKit builds. Point SAMPLE_API_IMAGE at another tag (e.g. :sha-abc1234, or a local build) to override.
+# GitHub Container Registry, so the host never builds (some container managers, Portainer among them,
+# can't run BuildKit builds). Point SAMPLE_API_IMAGE at another tag (e.g. :sha-abc1234, or a local build) to override.
 services:
   sample-api:
     image: ${SAMPLE_API_IMAGE:-ghcr.io/dewall88/bancontactpro-sample-api:latest}
     restart: unless-stopped
     ports:
-      # The Cloudflare tunnel route points at this host port.
+      # Your reverse proxy or tunnel forwards the public HTTPS hostname to this host port.
       - "${SAMPLE_API_PORT:-8085}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      # The hostname Bancontact reaches the app at (the Cloudflare hostname), no trailing slash.
-      PublicBaseUrl: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the Cloudflare hostname, e.g. https://bancontact-preprod.example.com}
+      # The public HTTPS address Bancontact reaches the app at, no trailing slash.
+      PublicBaseUrl: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the public HTTPS address, e.g. https://bancontact-preprod.example.com}
       # Shared key for the /payments endpoints (X-Sample-Key header). Without it they refuse everything.
       SampleApiKey: ${SAMPLE_API_KEY:?set SAMPLE_API_KEY to a long random string}
       BancontactPro__Environment: ${BANCONTACT_ENVIRONMENT:-Preprod}

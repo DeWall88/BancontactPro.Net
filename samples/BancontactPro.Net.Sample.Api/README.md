@@ -26,7 +26,7 @@ The callback URL Bancontact must call is `PUBLIC_BASE_URL` + `/bancontact/callba
 
 Bancontact's onboarding email gives **one API key and one PPID per product**. Each pair goes into that product's two variables:
 
-| In the email, under a product | Compose variable (Portainer) | Library setting |
+| In the email, under a product | Compose variable | Library setting |
 |---|---|---|
 | "A unique **API key**" | `BANCONTACT_<PRODUCT>_API_KEY` | `BancontactPro:Products:<Product>:ApiKey` |
 | "A unique **Product Profile Identifier** or PPID" | `BANCONTACT_<PRODUCT>_PPID` | `BancontactPro:Products:<Product>:MerchantProfileId` |
@@ -61,7 +61,7 @@ The signing key is shared by all products. Leave both empty to test payments. If
 | `SampleApiKey` (`SAMPLE_API_KEY`) | Shared key for `/payments`, a long random string you make up. Unset means those endpoints refuse everything. |
 | `BancontactPro:Environment` (`BANCONTACT_ENVIRONMENT`) | `Preprod` (default) or `Production`. |
 
-Credentials never go in the repository: use user-secrets locally and the stack's environment in Portainer.
+Credentials never go in the repository: use user-secrets locally, and a `.env` file or your container manager's environment settings on the host.
 
 ## Run locally
 
@@ -81,9 +81,9 @@ GitHub Actions ([`sample-api-image.yml`](../../.github/workflows/sample-api-imag
 - `ghcr.io/dewall88/bancontactpro-sample-api:latest`: what the compose file pulls by default.
 - `ghcr.io/dewall88/bancontactpro-sample-api:sha-<short commit>`: one per build, to pin or roll back with `SAMPLE_API_IMAGE`.
 
-The host never builds the image. That matters for Portainer: its Docker connection can't run BuildKit builds, so a compose file with a `build:` section fails there with "listing workers for Build".
+The host never builds the image. Besides being faster, that keeps the stack deployable from container managers that can't run BuildKit builds. Portainer, for example, fails on a compose file with a `build:` section with "listing workers for Build".
 
-GHCR packages start out **private**. After the first publish, make it public once (the package page on GitHub → **Package settings** → **Change visibility** → Public), or give Portainer a registry login for `ghcr.io`.
+GHCR packages start out **private**. After the first publish, make it public once (the package page on GitHub → **Package settings** → **Change visibility** → Public), or give your host a registry login for `ghcr.io`.
 
 To run a local build instead:
 
@@ -92,13 +92,17 @@ docker build -f samples/BancontactPro.Net.Sample.Api/Dockerfile -t bancontactpro
 SAMPLE_API_IMAGE=bancontactpro-sample-api:local docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d
 ```
 
-## Deploy on the Docker host behind Cloudflare
+## Deploy
 
-1. Create the stack in Portainer from `docker-compose.yml` (Repository method, reference `refs/heads/main`, compose path `samples/BancontactPro.Net.Sample.Api/docker-compose.yml`), or run `docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d` on the host. Set the variables from `.env.example`.
-2. Add a Cloudflare Tunnel public hostname that routes to `http://<docker host>:<SAMPLE_API_PORT>` (default 8085).
+Any Docker host works, as long as Bancontact can reach the app over **public HTTPS**.
+
+1. Run the stack with the variables from `.env.example`. Use either:
+   - `docker compose -f samples/BancontactPro.Net.Sample.Api/docker-compose.yml up -d` on the host, or
+   - a container manager pointed at this repository (reference `refs/heads/main`, compose path `samples/BancontactPro.Net.Sample.Api/docker-compose.yml`).
+2. Put HTTPS in front of `http://<docker host>:<SAMPLE_API_PORT>` (default 8085) with a reverse proxy (Caddy, Traefik, nginx) or a tunnel (Cloudflare Tunnel, ...). Forward the path unchanged: the callback signature covers it.
 3. Check `https://<hostname>/health`.
 4. Give Bancontact `https://<hostname>/bancontact/callback`.
 
-To update after a new image is published: **Pull and redeploy** the stack with **Re-pull image** switched on. Without it, Portainer keeps the image it already has.
+To update after a new image is published, pull it again and recreate the container: `docker compose pull && docker compose up -d`, or your container manager's redeploy with re-pulling the image switched on (in Portainer: **Pull and redeploy** with **Re-pull image**).
 
-Consider restricting the hostname in Cloudflare so only `/bancontact/callback` and `/health` are public (a WAF or Access rule on `/payments*`), on top of the shared key.
+Consider making only `/bancontact/callback` and `/health` public at the proxy or tunnel (block `/payments*`), on top of the shared key.
