@@ -1,7 +1,7 @@
 # BancontactPro.Net
 
 [![NuGet](https://img.shields.io/nuget/v/BancontactPro.Net.svg)](https://www.nuget.org/packages/BancontactPro.Net)
-[![License: Polyform Noncommercial](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](LICENSE)
+[![License: Polyform Noncommercial](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](https://github.com/DeWall88/BancontactPro.Net/blob/main/LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
 
 A strongly-typed **.NET 10** client library for [Bancontact Pro](https://docs.bancontactpro.com/)'s Merchant Payment/Refund/Reconciliation APIs, Belgium's Bancontact/Payconiq payment network. Targets Bancontact's in-store QR products — [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4), [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4), [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4), and [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4) — where the merchant backend creates a payment, renders the resulting QR code (or deep-links to the payer's banking app), and confirms the outcome via a signed webhook with a polling fallback.
@@ -81,7 +81,7 @@ only available D+1 09:00 CET.
 dotnet add package BancontactPro.Net
 ```
 
-*(Not yet published — this will work once the first release is tagged.)*
+Preview releases need `--prerelease` (`dotnet add package BancontactPro.Net --prerelease`). The package depends only on `Microsoft.Extensions.*`, so it works in ASP.NET Core apps, worker services and console apps alike.
 
 ## Usage
 

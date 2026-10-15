@@ -11,9 +11,9 @@
     <!-- Version is derived automatically from git tags by MinVer (tag format: v0.1.2) -->
     <Authors>DeWall88</Authors>
     <Copyright>© 2026 DeWall88</Copyright>
-    <Description>A strongly-typed .NET 10 client library for the Bancontact Pro Merchant Payment API (online payments: create, status, cancel), including JWS request signing and JWKS-verified webhook callbacks, with built-in DI registration and full IntelliSense documentation.</Description>
-    <PackageReleaseNotes>Initial scaffold — targets Bancontact Pro's Payment V3 API.</PackageReleaseNotes>
-    <PackageTags>bancontact;bancontactpro;payconiq;payments;belgium;client;webhooks;jws</PackageTags>
+    <Description>A strongly-typed .NET 10 client for the Bancontact Pro Merchant APIs (Payment, Refund, Reconciliation) and its QR products (On a Display, On a Receipt, Static QR, Top Up, Invoice): per-product credentials, JWS-signed refund and reconciliation calls, JWKS-verified callbacks, QR payload URLs, and dependency injection registration.</Description>
+    <PackageReleaseNotes>First release. Payment, Refund and Reconciliation APIs (v3); per-product API key and PPID through IBancontactClientFactory; callback verification against Bancontact's JWKS; PaymentLinkBuilder for QR payload URLs. Payment creation verified against Bancontact's pre-production environment.</PackageReleaseNotes>
+    <PackageTags>bancontact;bancontactpro;payconiq;payments;belgium;qr;client;webhooks;jws</PackageTags>
 
     <!-- Repository and project links -->
     <PackageProjectUrl>https://github.com/DeWall88/BancontactPro.Net</PackageProjectUrl>
@@ -50,11 +50,11 @@
     <None Include="LICENSE" Pack="true" PackagePath="\" />
   </ItemGroup>
 
+  <!-- Only Microsoft.Extensions.* (HttpClientFactory, options, configuration binding), not the whole ASP.NET Core
+       framework, so the package also works in console apps and worker services. -->
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.13" />
     <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
   </ItemGroup>
 

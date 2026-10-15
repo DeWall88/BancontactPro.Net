@@ -79,7 +79,7 @@ only available D+1 09:00 CET.
 dotnet add package BancontactPro.Net
 ```
 
-*(Not yet published — this will work once the first release is tagged.)*
+Preview releases need `--prerelease` (`dotnet add package BancontactPro.Net --prerelease`). The package depends only on `Microsoft.Extensions.*`, so it works in ASP.NET Core apps, worker services and console apps alike.
 
 ## Usage
 
