@@ -171,3 +171,16 @@ for the API research this library was built from.
 
 Built with AI pair-programming assistance from Claude Sonnet 5 (Anthropic) — commits are
 co-authored accordingly.
+
+## License
+
+BancontactPro.Net is free for **noncommercial** use under the [PolyForm Noncommercial License 1.0.0](https://github.com/DeWall88/BancontactPro.Net/blob/main/LICENSE):
+personal projects, study, hobby and amateur use, and use by charitable, educational, public
+research, public safety or health, environmental protection and government organizations.
+
+**Commercial use**, for example taking payments for a business or building the library into a
+product or service you sell, needs a separate commercial license. To ask for one, open an issue on
+[GitHub](https://github.com/DeWall88/BancontactPro.Net/issues) or contact
+[@DeWall88](https://github.com/DeWall88).
+
+Required Notice: Copyright (c) 2026 DeWall88 (https://github.com/DeWall88/BancontactPro.Net)
