@@ -77,6 +77,30 @@ public class PaymentClientTests
         Assert.Equal("5f91483d-78a7-4914-bc6f=", result.PaymentId);
     }
 
+    // Optional fields are optional, not nullable, in the spec (currency is an EUR-only enum, and omitted
+    // URLs fall back to the product's defaults), so unset ones must be left out rather than sent as null.
+    [Fact]
+    public async Task CreateAsync_MinimalRequest_SendsOnlyTheFieldsThatAreSet()
+    {
+        var (client, handler) = CreateClient();
+        handler.ResponseFactory = () => new HttpResponseMessage(HttpStatusCode.Created) { Content = new StringContent(SampleCreateResponseJson) };
+
+        await client.CreateAsync(new CreatePaymentRequest(Amount: 1000, Description: "Test"));
+
+        Assert.Equal("""{"amount":1000,"description":"Test"}""", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task CreateStaticQrPaymentAsync_MinimalRequest_SendsOnlyTheFieldsThatAreSet()
+    {
+        var (client, handler) = CreateClient();
+        handler.ResponseFactory = () => new HttpResponseMessage(HttpStatusCode.Created) { Content = new StringContent(SampleCreateResponseJson) };
+
+        await client.CreateStaticQrPaymentAsync(new CreateStaticQrPaymentRequest(Amount: 1000, PosId: "till-1"));
+
+        Assert.Equal("""{"amount":1000,"posId":"till-1"}""", handler.LastRequestBody);
+    }
+
     [Fact]
     public async Task GetAsync_GetsCorrectPathAndParsesResponse()
     {

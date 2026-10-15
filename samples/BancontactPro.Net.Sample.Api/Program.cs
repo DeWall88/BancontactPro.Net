@@ -2,13 +2,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using BancontactPro.Helpers;
+using BancontactPro.Http;
 using BancontactPro.Models;
+using BancontactPro.QrCodes;
+using BancontactPro.Refunds;
 using BancontactPro.Webhooks;
+using Microsoft.Extensions.Options;
 
 namespace BancontactPro.Sample.Api;
-
-/// <summary>A payment to create. <c>PosId</c> makes it a Static QR payment for that point of sale.</summary>
-public record CreatePaymentBody(BancontactProduct Product, long Amount, string? Reference, string? Description, string? PosId);
 
 public partial class Program
 {
@@ -16,8 +17,8 @@ public partial class Program
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.Services.AddBancontactProIntegration(builder.Configuration);
-        builder.Services.AddSingleton<IPaymentStore, InMemoryPaymentStore>();
-        // Products and statuses as names ("StaticQr", "SUCCEEDED") rather than numbers, in requests and responses.
+        builder.Services.AddSingleton<CallbackLog>();
+        // Enums as names ("SUCCEEDED", "EUR") in requests and responses, as Bancontact writes them.
         builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         var app = builder.Build();
@@ -26,90 +27,28 @@ public partial class Program
     }
 }
 
+/// <summary>
+/// A pass-through over the library: every route calls exactly one library method, which calls exactly one
+/// Bancontact endpoint. Routes are Bancontact's own paths with the product in front, e.g.
+/// <c>POST /OnDisplay/v3/payments</c> → <c>clients.Payments(OnDisplay).CreateAsync</c> →
+/// <c>POST https://merchant.api…/v3/payments</c> with On Display's API key. Bodies are Bancontact's own request
+/// and response shapes, and Bancontact's errors come back with their status, code and trace ID.
+/// Which product uses which call is Bancontact's documentation's business (see docs/getting-started.md), not
+/// this sample's: it forwards whatever you send.
+/// </summary>
 public static class SampleEndpoints
 {
     /// <summary>The path Bancontact calls. It must match the signed <c>path</c> claim, so a proxy in front must not rewrite it.</summary>
     public const string CallbackPath = "/bancontact/callback";
 
-    /// <summary>The header carrying the shared key the payment endpoints require.</summary>
+    /// <summary>The header carrying the shared key every route except <c>/health</c> and the callback requires.</summary>
     public const string ApiKeyHeader = "X-Sample-Key";
 
     public static void MapSampleEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-        // The payment endpoints sit behind a shared key: this app is reachable from the internet (Bancontact has to reach the callback), and
-        // creating or cancelling payments must not be open to everyone. No key configured means every request is refused.
-        var payments = app.MapGroup("/payments")
-            .AddEndpointFilter(async (context, next) =>
-            {
-                var expected = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>()["SampleApiKey"];
-                var supplied = context.HttpContext.Request.Headers[ApiKeyHeader].ToString();
-                var valid = !string.IsNullOrEmpty(expected)
-                    && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(supplied));
-                return valid ? await next(context) : Results.Unauthorized();
-            })
-            .AddEndpointFilter(async (context, next) =>
-            {
-                // A product without its API key and PPID can't be called: say which settings are missing instead of a 500.
-                try
-                {
-                    return await next(context);
-                }
-                catch (BancontactProductNotConfiguredException ex)
-                {
-                    return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest, title: $"Product {ex.Product} is not configured");
-                }
-            });
-
-        payments.MapPost("/", async (CreatePaymentBody body, IBancontactClientFactory clients, IPaymentStore store, IConfiguration config, HttpContext http, CancellationToken ct) =>
-        {
-            var client = clients.Payments(body.Product);
-
-            // PublicBaseUrl is the public address Bancontact reaches the app at. Behind a reverse proxy or tunnel the request's own
-            // scheme and host are the internal ones, so they are only the fallback for local runs.
-            var publicBaseUrl = config["PublicBaseUrl"]?.TrimEnd('/') ?? $"{http.Request.Scheme}://{http.Request.Host}";
-            var callbackUrl = $"{publicBaseUrl}{CallbackPath}";
-            var created = body.PosId is { Length: > 0 } posId
-                ? await client.CreateStaticQrPaymentAsync(new CreateStaticQrPaymentRequest(body.Amount, posId, body.Reference, Description: body.Description, CallbackUrl: callbackUrl), ct)
-                : await client.CreateAsync(new CreatePaymentRequest(body.Amount, body.Reference, Description: body.Description, CallbackUrl: callbackUrl), ct);
-
-            var record = new PaymentRecord(created.PaymentId, body.Product, created.Status, created.Amount, created.Reference, created.Links.Qrcode.Href, created.CreatedAt);
-            store.Add(record);
-            return Results.Created($"/payments/{created.PaymentId}", record);
-        });
-
-        // ?refresh=true asks Bancontact instead of trusting the stored status: the fallback when a callback is late or lost.
-        // The payment's own product decides which credentials are used.
-        payments.MapGet("/{paymentId}", async (string paymentId, bool? refresh, IBancontactClientFactory clients, IPaymentStore store, CancellationToken ct) =>
-        {
-            if (store.Get(paymentId) is not { } record)
-            {
-                return Results.NotFound();
-            }
-
-            if (refresh == true)
-            {
-                var payment = await clients.Payments(record.Product).GetAsync(paymentId, ct);
-                store.TryApplyStatus(paymentId, payment.Status, DateTimeOffset.UtcNow);
-            }
-
-            return Results.Ok(store.Get(paymentId));
-        });
-
-        payments.MapDelete("/{paymentId}", async (string paymentId, IBancontactClientFactory clients, IPaymentStore store, CancellationToken ct) =>
-        {
-            if (store.Get(paymentId) is not { } record)
-            {
-                return Results.NotFound();
-            }
-
-            await clients.Payments(record.Product).CancelAsync(paymentId, ct);
-            store.TryApplyStatus(paymentId, MerchantPaymentStatus.CANCELLED, DateTimeOffset.UtcNow);
-            return Results.NoContent();
-        });
-
-        app.MapPost(CallbackPath, async (HttpRequest request, BancontactCallbackVerifier verifier, IPaymentStore store, ILogger<Program> logger, CancellationToken ct) =>
+        app.MapPost(CallbackPath, async (HttpRequest request, BancontactCallbackVerifier verifier, CallbackLog log, ILogger<Program> logger, CancellationToken ct) =>
         {
             // Verify the exact bytes received: re-serialising a model first would change them and break the signature.
             using var buffer = new MemoryStream();
@@ -126,12 +65,190 @@ public static class SampleEndpoints
                 return Results.Unauthorized();
             }
 
-            var callback = verified.Payload;
-            var applied = store.TryApplyStatus(callback.PaymentId, callback.Status, callback.SucceededAt ?? DateTimeOffset.UtcNow);
-            logger.LogInformation("Callback {RequestId} for {PaymentId}: {Status} (applied: {Applied})", verified.RequestId, callback.PaymentId, callback.Status, applied);
+            log.Add(new ReceivedCallback(DateTimeOffset.UtcNow, verified.RequestId, verified.Payload));
+            logger.LogInformation("Callback {RequestId} for {PaymentId}: {Status}", verified.RequestId, verified.Payload.PaymentId, verified.Payload.Status);
 
-            // Always 2xx once the signature is valid, including duplicates and unknown payments, so Bancontact does not retry.
+            // 2xx once the signature is valid, so Bancontact does not retry.
             return Results.Ok();
         });
+
+        // Everything below calls Bancontact on your behalf, and this app is reachable from the internet (Bancontact has
+        // to reach the callback), so it sits behind a shared key. No key configured means every request is refused.
+        var api = app.MapGroup("")
+            .AddEndpointFilter(RequireSampleKey)
+            .AddEndpointFilter(TranslateErrors);
+
+        api.MapGet("/callbacks", (string? paymentId, CallbackLog log) => Results.Ok(log.Recent(paymentId)));
+
+        var perProduct = api.MapGroup("/{product}");
+        MapPayments(perProduct);
+        MapRefunds(perProduct);
+        MapReconciliation(perProduct);
+        MapQrCodes(perProduct);
     }
+
+    private static void MapPayments(RouteGroupBuilder routes)
+    {
+        routes.MapPost("/v3/payments", async (string product, CreatePaymentRequest body, IBancontactClientFactory clients, IConfiguration config, HttpContext http, CancellationToken ct) =>
+        {
+            var created = await clients.Payments(ParseProduct(product)).CreateAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
+            return Results.Json(created, statusCode: StatusCodes.Status201Created);
+        });
+
+        routes.MapPost("/v3/payments/pos", async (string product, CreateStaticQrPaymentRequest body, IBancontactClientFactory clients, IConfiguration config, HttpContext http, CancellationToken ct) =>
+        {
+            var created = await clients.Payments(ParseProduct(product)).CreateStaticQrPaymentAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
+            return Results.Json(created, statusCode: StatusCodes.Status201Created);
+        });
+
+        routes.MapGet("/v3/payments/{paymentId}", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Payments(ParseProduct(product)).GetAsync(paymentId, ct)));
+
+        routes.MapDelete("/v3/payments/{paymentId}", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
+        {
+            await clients.Payments(ParseProduct(product)).CancelAsync(paymentId, ct);
+            return Results.NoContent();
+        });
+
+        routes.MapPost("/v3/payments/search", async (string product, PaymentSearchQuery body, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Payments(ParseProduct(product)).SearchAsync(body, page, size, ct)));
+
+        routes.MapPost("/v3/payments/{paymentId}/acknowledge", async (string product, string paymentId, PaymentAcknowledgeRequest body, IBancontactClientFactory clients, CancellationToken ct) =>
+        {
+            await clients.Payments(ParseProduct(product)).AcknowledgeAsync(paymentId, body, ct);
+            return Results.NoContent();
+        });
+
+        routes.MapGet("/v3/payments/{paymentId}/debtor/refundIban", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Payments(ParseProduct(product)).GetDebtorRefundIbanAsync(paymentId, ct)));
+    }
+
+    private static void MapRefunds(RouteGroupBuilder routes)
+    {
+        routes.MapPost("/v3/payments/{paymentId}/refunds", async (string product, string paymentId, CreateRefundRequest body, HttpRequest request, IBancontactClientFactory clients, CancellationToken ct) =>
+        {
+            var idempotencyKey = request.Headers["Idempotency-Key"].ToString();
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+            {
+                throw new SampleRequestException(StatusCodes.Status400BadRequest, "Idempotency-Key header missing",
+                    "Creating a refund needs an Idempotency-Key header: generate one per refund attempt and reuse it when retrying.");
+            }
+
+            var created = await clients.Refunds(ParseProduct(product)).CreateAsync(paymentId, body, idempotencyKey, ct);
+            return Results.Json(created, statusCode: StatusCodes.Status201Created);
+        });
+
+        routes.MapGet("/v3/payments/{paymentId}/refunds/{refundId}", async (string product, string paymentId, string refundId, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Refunds(ParseProduct(product)).GetAsync(paymentId, refundId, ct)));
+    }
+
+    private static void MapReconciliation(RouteGroupBuilder routes)
+    {
+        routes.MapGet("/v3/reconciliation/payouts", async (string product, DateOnly? date, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetPayoutsAsync(date, page, size, ct)));
+
+        routes.MapGet("/v3/reconciliation/payments", async (string product, string? payoutId, DateOnly? startDate, DateOnly? endDate, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetPaymentsAsync(payoutId, startDate, endDate, page, size, ct)));
+
+        routes.MapGet("/v3/reconciliation/refunds", async (string product, string? payoutId, DateOnly? startDate, DateOnly? endDate, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
+            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetRefundsAsync(payoutId, startDate, endDate, page, size, ct)));
+    }
+
+    // Not API calls: PaymentLinkBuilder builds the QR payload URLs Bancontact's guides describe, with the product's PPID.
+    private static void MapQrCodes(RouteGroupBuilder routes)
+    {
+        routes.MapGet("/qr/payment-url", (string product, long? amount, string? description, string? reference, string? format, string? size, IOptions<BancontactProOptions> options) =>
+        {
+            var payloadUrl = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(Ppid(options.Value, ParseProduct(product)), amount, description, reference);
+            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(payloadUrl, ParseFormat(format), ParseSize(size))));
+        });
+
+        routes.MapGet("/qr/pos/{posId}", (string product, string posId, string? format, string? size, IOptions<BancontactProOptions> options) =>
+        {
+            var payloadUrl = PaymentLinkBuilder.BuildStaticQrLocationUrl(Ppid(options.Value, ParseProduct(product)), posId);
+            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(payloadUrl, ParseFormat(format), ParseSize(size))));
+        });
+    }
+
+    /// <summary>The payload a QR code carries, and the URL of Bancontact's generator rendering it as an image.</summary>
+    public sealed record QrCodeLinks(string PayloadUrl, string QrCodeImageUrl);
+
+    /// <summary>
+    /// When a create call names no callbackUrl, point it at this app so its callbacks show up in <c>GET /callbacks</c>.
+    /// PublicBaseUrl is the address Bancontact reaches the app at; behind a reverse proxy or tunnel the request's own
+    /// scheme and host are the internal ones, so they are only the fallback for local runs.
+    /// </summary>
+    private static string DefaultCallbackUrl(IConfiguration config, HttpContext http) =>
+        (config["PublicBaseUrl"]?.TrimEnd('/') ?? $"{http.Request.Scheme}://{http.Request.Host}") + CallbackPath;
+
+    private static string Ppid(BancontactProOptions options, BancontactProduct product) =>
+        options.GetCredentials(product)?.MerchantProfileId ?? throw new BancontactProductNotConfiguredException(product);
+
+    private static BancontactProduct ParseProduct(string value) =>
+        Enum.TryParse<BancontactProduct>(value, ignoreCase: true, out var product) && Enum.IsDefined(product)
+            ? product
+            : throw new SampleRequestException(StatusCodes.Status404NotFound, $"Unknown product '{value}'",
+                $"The first path segment is the product: {string.Join(", ", Enum.GetNames<BancontactProduct>())}.");
+
+    private static QrCodeImageFormat ParseFormat(string? value) =>
+        value is null ? QrCodeImageFormat.PNG
+        : Enum.TryParse<QrCodeImageFormat>(value, ignoreCase: true, out var format) && Enum.IsDefined(format) ? format
+        : throw new SampleRequestException(StatusCodes.Status400BadRequest, $"Unknown format '{value}'", "format is PNG or SVG.");
+
+    private static QrCodeImageSize? ParseSize(string? value) =>
+        value is null ? null
+        : Enum.TryParse<QrCodeImageSize>(value, ignoreCase: true, out var size) && Enum.IsDefined(size) ? size
+        : throw new SampleRequestException(StatusCodes.Status400BadRequest, $"Unknown size '{value}'", "size is S, M, L or XL (PNG only).");
+
+    private static async ValueTask<object?> RequireSampleKey(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var expected = context.HttpContext.RequestServices.GetRequiredService<IConfiguration>()["SampleApiKey"];
+        var supplied = context.HttpContext.Request.Headers[ApiKeyHeader].ToString();
+        var valid = !string.IsNullOrEmpty(expected)
+            && CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(expected), Encoding.UTF8.GetBytes(supplied));
+        return valid ? await next(context) : Results.Unauthorized();
+    }
+
+    /// <summary>Turns the library's exceptions into problem responses, so a failed call says why instead of returning an empty 500.</summary>
+    private static async ValueTask<object?> TranslateErrors(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        try
+        {
+            return await next(context);
+        }
+        catch (SampleRequestException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: ex.StatusCode, title: ex.Title);
+        }
+        catch (BancontactProductNotConfiguredException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest, title: $"Product {ex.Product} is not configured");
+        }
+        catch (BancontactSigningKeyNotConfiguredException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest, title: "No signing key configured");
+        }
+        catch (RefundIdempotencyConflictException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, title: "Idempotency-Key reused with different refund parameters");
+        }
+        catch (BancontactApiException ex)
+        {
+            // Bancontact's own status, code and trace IDs, as it sent them: the trace and span IDs are what its support asks for.
+            return Results.Problem(ex.Message, statusCode: (int)ex.StatusCode, title: $"Bancontact returned {(int)ex.StatusCode} {ex.Code}".TrimEnd(),
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code, ["traceId"] = ex.TraceId, ["spanId"] = ex.SpanId });
+        }
+        catch (HttpRequestException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status502BadGateway, title: "Could not reach Bancontact");
+        }
+    }
+}
+
+/// <summary>A request the sample itself refuses (unknown product, missing header, ...), with the status to answer.</summary>
+public sealed class SampleRequestException(int statusCode, string title, string message) : Exception(message)
+{
+    public int StatusCode { get; } = statusCode;
+
+    public string Title { get; } = title;
 }

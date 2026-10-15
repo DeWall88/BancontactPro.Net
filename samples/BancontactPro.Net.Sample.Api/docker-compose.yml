@@ -17,7 +17,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       # The public HTTPS address Bancontact reaches the app at, no trailing slash.
       PublicBaseUrl: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the public HTTPS address, e.g. https://bancontact-preprod.example.com}
-      # Shared key for the /payments endpoints (X-Sample-Key header). Without it they refuse everything.
+      # Shared key (X-Sample-Key header) for every route except /health and the callback. Without it they refuse everything.
       SampleApiKey: ${SAMPLE_API_KEY:?set SAMPLE_API_KEY to a long random string}
       BancontactPro__Environment: ${BANCONTACT_ENVIRONMENT:-Preprod}
 

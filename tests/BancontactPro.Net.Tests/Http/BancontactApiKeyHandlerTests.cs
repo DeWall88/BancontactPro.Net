@@ -29,6 +29,18 @@ public class BancontactApiKeyHandlerTests
         Assert.False(inner.LastRequest.Headers.Contains("Signature"));
     }
 
+    [Fact]
+    public async Task SendAsync_JsonBody_IsSentWithAContentLength()
+    {
+        var inner = new CapturingHandler();
+        using var client = new HttpClient(new BancontactApiKeyHandler("api-key") { InnerHandler = inner });
+
+        // JsonContent streams by default and can't report its length up front: without buffering it would go out chunked.
+        await client.PostAsync("https://merchant.api.preprod.bancontact.net/v3/payments", System.Net.Http.Json.JsonContent.Create(new { amount = 100 }));
+
+        Assert.Equal("""{"amount":100}""".Length, inner.LastRequest!.Content!.Headers.ContentLength);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

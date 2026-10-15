@@ -1,28 +1,55 @@
 # BancontactPro.Net sample API
 
-A small, standalone ASP.NET Core minimal API that uses the `BancontactPro.Net` library. It exists to:
+A small, standalone ASP.NET Core minimal API over the `BancontactPro.Net` library. It exists to:
 
+- exercise **every library call** against Bancontact's preprod (or production) environment over plain HTTP, e.g. from Postman,
 - give Bancontact a **public HTTPS callback URL** that verifies signatures with `BancontactCallbackVerifier`,
-- exercise the library against Bancontact's **preprod** environment end to end,
 - serve as a runnable example of wiring the library into an app.
 
-It does not depend on any other project. Payments are kept **in memory** (a restart forgets them); swap `IPaymentStore` for a database in a real application.
+It does not depend on any other project.
 
-## Endpoints
+## Routes
 
-| Method and path | Auth | What it does |
+The sample is a **pass-through**. Every route is Bancontact's own path with the product in front, and calls exactly one library method, which calls exactly one Bancontact endpoint with that product's credentials:
+
+```
+POST /OnDisplay/v3/payments  →  clients.Payments(OnDisplay).CreateAsync  →  POST https://merchant.api…/v3/payments  (On Display's API key)
+```
+
+Request and response bodies are Bancontact's own shapes (see the [Merchant Payment API](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json)). The sample adds no logic about which product uses which call: that is in the [getting started guide](../../docs/getting-started.md#which-product-uses-which-call).
+
+| Route | Library call | Bancontact endpoint |
 |---|---|---|
-| `GET /health` | none | Liveness. |
-| `POST /bancontact/callback` | Bancontact's JWS `Signature` header | Verifies the callback, then applies the status idempotently. Invalid signature: 401. Valid but duplicate, stale or unknown: 200. |
-| `POST /payments` | `X-Sample-Key` | Creates a payment for one product. Body: `{ "product": "StaticQr", "amount": 1000, "reference": "...", "description": "...", "posId": "..." }` (amount in cents). With `posId` it creates a Static QR payment, without it a regular one. A product without its API key and PPID: 400, naming the missing settings. |
-| `GET /payments/{id}[?refresh=true]` | `X-Sample-Key` | The stored payment. `refresh=true` asks Bancontact first, with the credentials of the product the payment was created for: the fallback for a late or lost callback. |
-| `DELETE /payments/{id}` | `X-Sample-Key` | Cancels the payment, again with its own product's credentials. |
+| `POST /{product}/v3/payments` | `Payments(product).CreateAsync` | `POST /v3/payments` |
+| `POST /{product}/v3/payments/pos` | `Payments(product).CreateStaticQrPaymentAsync` | `POST /v3/payments/pos` |
+| `GET /{product}/v3/payments/{id}` | `Payments(product).GetAsync` | `GET /v3/payments/{id}` |
+| `DELETE /{product}/v3/payments/{id}` | `Payments(product).CancelAsync` | `DELETE /v3/payments/{id}` |
+| `POST /{product}/v3/payments/search?page&size` | `Payments(product).SearchAsync` | `POST /v3/payments/search` |
+| `POST /{product}/v3/payments/{id}/acknowledge` | `Payments(product).AcknowledgeAsync` | `POST /v3/payments/{id}/acknowledge` |
+| `GET /{product}/v3/payments/{id}/debtor/refundIban` | `Payments(product).GetDebtorRefundIbanAsync` | `GET /v3/payments/{id}/debtor/refundIban` |
+| `POST /{product}/v3/payments/{id}/refunds` (`Idempotency-Key` header) | `Refunds(product).CreateAsync` | `POST /v3/payments/{id}/refunds` (signed) |
+| `GET /{product}/v3/payments/{id}/refunds/{refundId}` | `Refunds(product).GetAsync` | `GET …/refunds/{refundId}` (signed) |
+| `GET /{product}/v3/reconciliation/payouts?date&page&size` | `Reconciliation(product).GetPayoutsAsync` | `GET /v3/reconciliation/payouts` (signed) |
+| `GET /{product}/v3/reconciliation/payments?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetPaymentsAsync` | `GET /v3/reconciliation/payments` (signed) |
+| `GET /{product}/v3/reconciliation/refunds?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetRefundsAsync` | `GET /v3/reconciliation/refunds` (signed) |
+| `GET /{product}/qr/payment-url?amount&description&reference&format&size` | `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` + `BuildQrCodeImageUrl` | none: built with the product's PPID |
+| `GET /{product}/qr/pos/{posId}?format&size` | `PaymentLinkBuilder.BuildStaticQrLocationUrl` + `BuildQrCodeImageUrl` | none: the till's Static QR sticker |
+| `POST /bancontact/callback` | `BancontactCallbackVerifier` | Bancontact calls this |
+| `GET /callbacks?paymentId` | none | The last 100 verified callbacks, newest first |
+| `GET /health` | none | Liveness |
 
-`product` is one of `OnDisplay`, `OnReceipt`, `StaticQr`, `TopUp`, `Invoice`.
+`{product}` is one of `OnDisplay`, `OnReceipt`, `StaticQr`, `TopUp`, `Invoice` (case-insensitive).
+
+Everything except `/health` and the callback needs the `X-Sample-Key` header: the sample calls Bancontact on your behalf and is reachable from the internet.
+
+Two things the sample does on top of the pass-through:
+
+- **Default callback URL.** A create call without `callbackUrl` gets `PUBLIC_BASE_URL` + `/bancontact/callback`, so its callbacks show up in `GET /callbacks`. Send your own `callbackUrl` to override it.
+- **Readable errors.** Failures come back as problem details instead of an empty 500: Bancontact's own status with its error `code`, message, `traceId` and `spanId` (what Bancontact support asks for), 400 naming the missing settings for a product without credentials or a signed call without a signing key, 404 for an unknown product, 502 when Bancontact can't be reached.
 
 The callback URL Bancontact must call is `PUBLIC_BASE_URL` + `/bancontact/callback`. The signature covers the request path, so the proxy in front must not rewrite it.
 
-**Postman:** import [`BancontactPro.Net.Sample.Api.postman_collection.json`](BancontactPro.Net.Sample.Api.postman_collection.json) for all of the above, plus checks that a public deployment refuses calls without the key or the signature. Set the collection variables `baseUrl` and `sampleKey`; put the key in *Current value* only, so it isn't saved into exports. The create requests remember the new payment's ID for Get and Cancel.
+**Postman:** import [`BancontactPro.Net.Sample.Api.postman_collection.json`](BancontactPro.Net.Sample.Api.postman_collection.json): one request per route, with test assertions. Set the collection variables `baseUrl`, `sampleKey` (in *Current value* only, so it isn't saved into exports) and `product`. The create requests remember the new payment's and refund's ID for the requests after them.
 
 ## Where Bancontact's credentials go
 
@@ -44,7 +71,7 @@ Bancontact's onboarding email gives **one API key and one PPID per product**. Ea
 
 So for the Static QR entry in the email: its API key goes in `BANCONTACT_STATICQR_API_KEY` and its PPID in `BANCONTACT_STATICQR_PPID`. Leave the variables of products you don't have empty.
 
-**A pair is all or nothing.** A product with only one of its two values set stops the app at startup with a message naming the missing setting. A product with neither is simply unavailable: creating a payment for it returns 400 and nothing is sent to Bancontact. At least one product must be configured.
+**A pair is all or nothing.** A product with only one of its two values set stops the app at startup with a message naming the missing setting. A product with neither is simply unavailable: any route for it returns 400 and nothing is sent to Bancontact. At least one product must be configured.
 
 **About the "JWS key".** Bancontact's specs don't have them issue a private key to you. Callbacks are signed by Bancontact and verified against their public JWKS, which the library fetches by itself, so they need nothing from you. Only the Refund and Reconciliation APIs need a signature from *you*. For that you generate your own key pair, host the public half as a JWKS, and share its URL with Bancontact. Then fill in:
 
@@ -60,7 +87,7 @@ The signing key is shared by all products. Leave both empty to test payments. If
 | Setting (compose variable) | Meaning |
 |---|---|
 | `PublicBaseUrl` (`PUBLIC_BASE_URL`) | The public hostname, e.g. `https://bancontact-preprod.example.com`, no trailing slash. |
-| `SampleApiKey` (`SAMPLE_API_KEY`) | Shared key for `/payments`, a long random string you make up. Unset means those endpoints refuse everything. |
+| `SampleApiKey` (`SAMPLE_API_KEY`) | Shared key (`X-Sample-Key` header) for every route except `/health` and the callback, a long random string you make up. Unset means those routes refuse everything. |
 | `BancontactPro:Environment` (`BANCONTACT_ENVIRONMENT`) | `Preprod` (default) or `Production`. |
 
 Credentials never go in the repository: use user-secrets locally, and a `.env` file or your container manager's environment settings on the host.
@@ -107,4 +134,4 @@ Any Docker host works, as long as Bancontact can reach the app over **public HTT
 
 To update after a new image is published, pull it again and recreate the container: `docker compose pull && docker compose up -d`, or your container manager's redeploy with re-pulling the image switched on (in Portainer: **Pull and redeploy** with **Re-pull image**).
 
-Consider making only `/bancontact/callback` and `/health` public at the proxy or tunnel (block `/payments*`), on top of the shared key.
+Consider making only `/bancontact/callback` and `/health` public at the proxy or tunnel (block everything else), on top of the shared key.

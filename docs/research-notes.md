@@ -54,6 +54,18 @@ getting-started guide's onboarding list also mentions "a unique API key and/or J
 in the specs has Bancontact issue a private key, so that phrase is unresolved. Ask devsupport if
 one arrives.
 
+**Open (2026-10-15): the Authorization header format.** The OpenAPI scheme describes "Bearer
+authentication with API Key", and the library sends `Authorization: Bearer {apiKey}`. The product
+guides' curl examples send the bare key instead (`Authorization: YOUR_API_KEY_HERE`). The first
+preprod call will tell which one Bancontact accepts: the sample API passes Bancontact's status and
+error code through.
+
+**Also confirmed by the guides (2026-10-15):** optional request fields are optional, not nullable
+(`currency` "defaults to EUR", URLs "default to the one set in the profile"), so the library
+leaves unset fields out of the JSON instead of sending `null`. Only On a Display and Static QR
+create payments through the API; On a Receipt, Top Up and Invoice are QR payload URLs built locally
+(see getting-started.md, "Which product uses which call").
+
 Signature computation (identical across all three specs):
 
 ```text

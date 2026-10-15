@@ -21,9 +21,17 @@ public sealed class BancontactApiKeyHandler : DelegatingHandler
     }
 
     /// <inheritdoc />
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        return base.SendAsync(request, cancellationToken);
+
+        // JSON bodies are streamed by default, which sends them chunked without a Content-Length. Buffer
+        // them so the request carries a Content-Length, as the signed (Refund, Reconciliation) calls do.
+        if (request.Content is not null)
+        {
+            await request.Content.LoadIntoBufferAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 }

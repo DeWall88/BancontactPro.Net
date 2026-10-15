@@ -179,6 +179,26 @@ without a complete pair throws `BancontactProductNotConfiguredException`; asking
 Reconciliation client without a signing key throws `BancontactSigningKeyNotConfiguredException`.
 Both say which settings are missing, and nothing is sent to Bancontact.
 
+## Which product uses which call
+
+The library wraps the API one-to-one and doesn't decide which product uses which call: Bancontact's
+product guides do. In short:
+
+| Product | How a payment starts | Library call | How you learn the outcome |
+|---|---|---|---|
+| [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4) | One payment per sale, its QR code shown on a screen; valid **120 seconds** | `clients.Payments(OnDisplay).CreateAsync` → `POST /v3/payments` | Callback; `GetAsync` as the fallback |
+| [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4) | A sticker per till, printed once (`PaymentLinkBuilder.BuildStaticQrLocationUrl`); per sale, a payment created just before the customer scans; valid **120 seconds** | `clients.Payments(StaticQr).CreateStaticQrPaymentAsync` → `POST /v3/payments/pos` with the till's `posId` | Callback; `GetAsync` as the fallback |
+| [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4) | A QR code printed on the receipt, built locally | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Callback to the URL configured on the product; the payment ID first appears there |
+| [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4) | Same as On a Receipt. Top Up needs a callback URL configured on the product by Bancontact | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Same as On a Receipt |
+| [Invoice](https://docs.bancontactpro.com/guides/invoice/invoice052025v4) | Same as On a Receipt; the guide says Bancontact no longer offers it directly | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Same as On a Receipt |
+
+For every product, `GetAsync`, `SearchAsync`, refunds and reconciliation use the clients of the
+product the payment belongs to. For URL-based products, each combination of amount, description
+and reference must be unique, or the QR code can be treated as already paid.
+
+The [sample API](../samples/BancontactPro.Net.Sample.Api/README.md) exposes every call over HTTP,
+one route per library method, for trying these flows against preprod.
+
 ## 6. Create a payment
 
 Corresponds to `POST /v3/payments` in the
