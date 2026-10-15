@@ -83,7 +83,7 @@ GitHub Actions ([`sample-api-image.yml`](../../.github/workflows/sample-api-imag
 
 The host never builds the image. Besides being faster, that keeps the stack deployable from container managers that can't run BuildKit builds. Portainer, for example, fails on a compose file with a `build:` section with "listing workers for Build".
 
-GHCR packages start out **private**. After the first publish, make it public once (the package page on GitHub → **Package settings** → **Change visibility** → Public), or give your host a registry login for `ghcr.io`.
+For a public repository the package is public too, so any host can pull it without logging in. If yours is private (a private fork, for example), make the package public on GitHub (package page → **Package settings** → **Change visibility**) or give your host a registry login for `ghcr.io`.
 
 To run a local build instead:
 
