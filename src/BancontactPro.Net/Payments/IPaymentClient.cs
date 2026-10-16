@@ -6,6 +6,12 @@ namespace BancontactPro.Payments;
 public interface IPaymentClient
 {
     /// <summary>Creates an online payment (<c>POST v3/payments</c>).</summary>
+    /// <remarks>
+    /// If this call times out (or the connection drops before a response), the outcome is unknown: Bancontact
+    /// may have created the payment. Don't retry blindly, which could create a second one. Look the payment up by
+    /// the <see cref="CreatePaymentRequest.Reference"/> you sent with <see cref="SearchAsync"/> first, which
+    /// only works if the reference identifies this attempt.
+    /// </remarks>
     Task<CreatePaymentResponse> CreateAsync(CreatePaymentRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Gets a payment by id (<c>GET v3/payments/{id}</c>) — the documented polling fallback.</summary>
@@ -34,5 +40,9 @@ public interface IPaymentClient
     Task<DebtorRefundIban> GetDebtorRefundIbanAsync(string paymentId, CancellationToken cancellationToken = default);
 
     /// <summary>Creates a static QR (in-person/POS) payment (<c>POST v3/payments/pos</c>).</summary>
+    /// <remarks>
+    /// A timed-out call has an unknown outcome, as for <see cref="CreateAsync"/>: look the payment up by reference
+    /// with <see cref="SearchAsync"/> before retrying. A retry also replaces the till's active payment.
+    /// </remarks>
     Task<CreatePaymentResponse> CreateStaticQrPaymentAsync(CreateStaticQrPaymentRequest request, CancellationToken cancellationToken = default);
 }

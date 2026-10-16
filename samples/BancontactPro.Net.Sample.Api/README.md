@@ -8,30 +8,32 @@ A small, standalone ASP.NET Core minimal API over the `BancontactPro.Net` librar
 
 It does not depend on any other project.
 
+It registers the library with `AddBancontactProIntegration(configuration)` because its settings are static (environment variables, validated when the app starts). An application whose credentials change at runtime, or that must start with none, registers an `IBancontactCredentialsProvider` with `AddBancontactPro<TProvider>()` instead: see [step 5 of the getting started guide](../../docs/getting-started.md#5-register-the-integration). Either way the routes are the same, and the QR routes read the environment and PPID from the provider.
+
 ## Routes
 
 The sample is a **pass-through**. Every route is Bancontact's own path with the product in front, and calls exactly one library method, which calls exactly one Bancontact endpoint with that product's credentials:
 
 ```
-POST /OnDisplay/v3/payments  →  clients.Payments(OnDisplay).CreateAsync  →  POST https://merchant.api…/v3/payments  (On Display's API key)
+POST /OnDisplay/v3/payments  →  (await clients.PaymentsAsync(OnDisplay)).CreateAsync  →  POST https://merchant.api…/v3/payments  (On Display's API key)
 ```
 
 Request and response bodies are Bancontact's own shapes (see the [Merchant Payment API](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json)). The sample adds no logic about which product uses which call: that is in the [getting started guide](../../docs/getting-started.md#which-product-uses-which-call).
 
 | Route | Library call | Bancontact endpoint |
 |---|---|---|
-| `POST /{product}/v3/payments` | `Payments(product).CreateAsync` | `POST /v3/payments` |
-| `POST /{product}/v3/payments/pos` | `Payments(product).CreateStaticQrPaymentAsync` | `POST /v3/payments/pos` |
-| `GET /{product}/v3/payments/{id}` | `Payments(product).GetAsync` | `GET /v3/payments/{id}` |
-| `DELETE /{product}/v3/payments/{id}` | `Payments(product).CancelAsync` | `DELETE /v3/payments/{id}` |
-| `POST /{product}/v3/payments/search?page&size` | `Payments(product).SearchAsync` | `POST /v3/payments/search` |
-| `POST /{product}/v3/payments/{id}/acknowledge` | `Payments(product).AcknowledgeAsync` | `POST /v3/payments/{id}/acknowledge` |
-| `GET /{product}/v3/payments/{id}/debtor/refundIban` | `Payments(product).GetDebtorRefundIbanAsync` | `GET /v3/payments/{id}/debtor/refundIban` |
-| `POST /{product}/v3/payments/{id}/refunds` (`Idempotency-Key` header) | `Refunds(product).CreateAsync` | `POST /v3/payments/{id}/refunds` (signed) |
-| `GET /{product}/v3/payments/{id}/refunds/{refundId}` | `Refunds(product).GetAsync` | `GET …/refunds/{refundId}` (signed) |
-| `GET /{product}/v3/reconciliation/payouts?date&page&size` | `Reconciliation(product).GetPayoutsAsync` | `GET /v3/reconciliation/payouts` (signed) |
-| `GET /{product}/v3/reconciliation/payments?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetPaymentsAsync` | `GET /v3/reconciliation/payments` (signed) |
-| `GET /{product}/v3/reconciliation/refunds?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetRefundsAsync` | `GET /v3/reconciliation/refunds` (signed) |
+| `POST /{product}/v3/payments` | `(await PaymentsAsync(product)).CreateAsync` | `POST /v3/payments` |
+| `POST /{product}/v3/payments/pos` | `(await PaymentsAsync(product)).CreateStaticQrPaymentAsync` | `POST /v3/payments/pos` |
+| `GET /{product}/v3/payments/{id}` | `(await PaymentsAsync(product)).GetAsync` | `GET /v3/payments/{id}` |
+| `DELETE /{product}/v3/payments/{id}` | `(await PaymentsAsync(product)).CancelAsync` | `DELETE /v3/payments/{id}` |
+| `POST /{product}/v3/payments/search?page&size` | `(await PaymentsAsync(product)).SearchAsync` | `POST /v3/payments/search` |
+| `POST /{product}/v3/payments/{id}/acknowledge` | `(await PaymentsAsync(product)).AcknowledgeAsync` | `POST /v3/payments/{id}/acknowledge` |
+| `GET /{product}/v3/payments/{id}/debtor/refundIban` | `(await PaymentsAsync(product)).GetDebtorRefundIbanAsync` | `GET /v3/payments/{id}/debtor/refundIban` |
+| `POST /{product}/v3/payments/{id}/refunds` (`Idempotency-Key` header) | `(await RefundsAsync(product)).CreateAsync` | `POST /v3/payments/{id}/refunds` (signed) |
+| `GET /{product}/v3/payments/{id}/refunds/{refundId}` | `(await RefundsAsync(product)).GetAsync` | `GET …/refunds/{refundId}` (signed) |
+| `GET /{product}/v3/reconciliation/payouts?date&page&size` | `(await ReconciliationAsync(product)).GetPayoutsAsync` | `GET /v3/reconciliation/payouts` (signed) |
+| `GET /{product}/v3/reconciliation/payments?payoutId&startDate&endDate&page&size` | `(await ReconciliationAsync(product)).GetPaymentsAsync` | `GET /v3/reconciliation/payments` (signed) |
+| `GET /{product}/v3/reconciliation/refunds?payoutId&startDate&endDate&page&size` | `(await ReconciliationAsync(product)).GetRefundsAsync` | `GET /v3/reconciliation/refunds` (signed) |
 | `GET /{product}/qr/payment-url?amount&description&reference&format&size` | `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` + `BuildQrCodeImageUrl` | none: built with the product's PPID, on the configured environment's hosts |
 | `GET /{product}/qr/pos/{posId}?format&size` | `PaymentLinkBuilder.BuildStaticQrLocationUrl` + `BuildQrCodeImageUrl` | none: the till's Static QR sticker, on the configured environment's hosts |
 | `POST /bancontact/callback` | `BancontactCallbackVerifier` | Bancontact calls this |

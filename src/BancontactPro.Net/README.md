@@ -118,26 +118,46 @@ only the products you use. Where each item of Bancontact's onboarding email goes
 | "… and/or JWS key" | none | Nothing to fill in: Bancontact doesn't issue you a private key |
 | *(your own, for Refund/Reconciliation)* | `Kid` + `PrivateKeyPem` | Only for Refund and Reconciliation clients; shared by all products |
 
-Then register the integration and ask `IBancontactClientFactory` for a client per product:
+Then register the integration and ask `IBancontactClientFactory` for a client per product. There are
+two ways to register, over the same core:
+
+| | `AddBancontactProIntegration(configuration)` | `AddBancontactPro<TProvider>()` |
+|---|---|---|
+| Use it when | The settings are static: appsettings, environment variables, user secrets | The host keeps its credentials somewhere that changes at runtime (a database, an admin page), or must start with none |
+| Credentials come from | `BancontactProOptions`, bound once from the `BancontactPro` section | Your `IBancontactCredentialsProvider`, asked on every call |
+| At startup | Validated: the host does not start without a configured product | Nothing is read or validated: with nothing configured the host starts, and clients report "not configured" when used |
+| A change applies | After a restart | To the next call |
 
 ```csharp
-builder.Services.AddBancontactProIntegration(builder.Configuration);
+builder.Services.AddBancontactProIntegration(builder.Configuration);   // static settings
+// or
+builder.Services.AddBancontactPro<MyCredentialsProvider>();            // credentials that can change
 ```
 
 ```csharp
 public class CheckoutService(IBancontactClientFactory clients)
 {
-    public Task<CreatePaymentResponse> CreateAsync(long amountInCents) =>
-        clients.Payments(BancontactProduct.OnDisplay).CreateAsync(new CreatePaymentRequest(amountInCents));
+    public async Task<CreatePaymentResponse> CreateAsync(long amountInCents)
+    {
+        var payments = await clients.PaymentsAsync(BancontactProduct.OnDisplay);
+        return await payments.CreateAsync(new CreatePaymentRequest(amountInCents));
+    }
 }
 ```
 
-A call is only possible for a product with a complete pair. `clients.Payments(product)`,
-`clients.Refunds(product)` and `clients.Reconciliation(product)` throw
+A call is only possible for a product with a complete pair. `clients.PaymentsAsync(product)`,
+`RefundsAsync(product)` and `ReconciliationAsync(product)` throw
 `BancontactProductNotConfiguredException` for a product without one, and the Refund and
 Reconciliation clients throw `BancontactSigningKeyNotConfiguredException` without a signing key.
 Nothing is sent to Bancontact in either case. Fetch, cancel and refund a payment with the same
-product it was created with.
+product it was created with. Ask the factory for a client per operation instead of holding on to
+one: a client keeps the credentials and environment it was created with.
+
+A provider returns a `BancontactCredentials` (environment, API key and PPID per product, optional
+signing key). `ConfigurationCredentialsProvider`, the one behind `AddBancontactProIntegration`,
+shows how to build it. See
+[docs/getting-started.md](https://github.com/DeWall88/BancontactPro.Net/blob/main/docs/getting-started.md#5-register-the-integration)
+for a provider backed by a database.
 
 Verifying an inbound webhook callback:
 

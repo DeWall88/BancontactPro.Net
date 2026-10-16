@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace BancontactPro.Net.Tests.Helpers;
 
+/// <summary>Registration from configuration (<c>AddBancontactProIntegration</c>): static settings, validated on start.</summary>
 public class BancontactProServiceCollectionExtensionsTests
 {
     private sealed class CapturingHandler : HttpMessageHandler
@@ -71,7 +72,7 @@ public class BancontactProServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<IBancontactClientFactory>());
         Assert.NotNull(provider.GetRequiredService<IJwksClient>());
         Assert.NotNull(provider.GetRequiredService<BancontactCallbackVerifier>());
-        Assert.NotNull(provider.GetRequiredService<IRequestSigningKeyProvider>());
+        Assert.IsType<ConfigurationCredentialsProvider>(provider.GetRequiredService<IBancontactCredentialsProvider>());
     }
 
     [Fact]
@@ -84,29 +85,52 @@ public class BancontactProServiceCollectionExtensionsTests
         Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IOptions<BancontactProOptions>>().Value);
     }
 
-    [Theory]
-    [InlineData("Preprod", "https://jwks.preprod.bancontact.net/")]
-    [InlineData("Production", "https://jwks.bancontact.net/")]
-    public void AddBancontactProIntegration_JwksClientFollowsEnvironment(string environment, string expected)
+    [Fact]
+    public void AddBancontactProIntegration_NoProductConfigured_FailsStartupValidation()
     {
-        var (provider, _) = Build(BuildConfiguration(environment));
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+        var (provider, _) = Build(configuration);
         using var _p = provider;
 
-        Assert.Equal(expected, provider.GetRequiredService<IOptions<JwksClientOptions>>().Value.JwksUri.ToString());
+        var failure = Assert.Throws<OptionsValidationException>(() => provider.GetRequiredService<IStartupValidator>().Validate());
+        Assert.Contains(failure.Failures, message => message.Contains("at least one product"));
     }
 
     [Fact]
-    public void Factory_ReportsWhichProductsAreConfigured()
+    public void AddBancontactProIntegration_ValidConfiguration_PassesStartupValidation()
+    {
+        var (provider, _) = Build(BuildConfiguration());
+        using var _p = provider;
+
+        provider.GetRequiredService<IStartupValidator>().Validate();
+    }
+
+    [Theory]
+    [InlineData("Preprod", "jwks.preprod.bancontact.net")]
+    [InlineData("Production", "jwks.bancontact.net")]
+    public async Task AddBancontactProIntegration_JwksClientFollowsEnvironment(string environment, string expectedHost)
+    {
+        var (provider, handler) = Build(BuildConfiguration(environment));
+        using var _p = provider;
+
+        // The canned empty response isn't a JWKS; only the address that was asked matters here.
+        await Assert.ThrowsAsync<System.Text.Json.JsonException>(() => provider.GetRequiredService<IJwksClient>().GetKeyAsync("kid"));
+
+        Assert.Equal(expectedHost, handler.LastRequest!.RequestUri!.Host);
+    }
+
+    [Fact]
+    public async Task Factory_ReportsWhichProductsAreConfigured()
     {
         var (provider, _) = Build(BuildConfiguration());
         using var _p = provider;
         var factory = provider.GetRequiredService<IBancontactClientFactory>();
 
-        Assert.True(factory.IsConfigured(BancontactProduct.StaticQr));
-        Assert.True(factory.IsConfigured(BancontactProduct.OnDisplay));
-        Assert.False(factory.IsConfigured(BancontactProduct.TopUp));
-        Assert.False(factory.IsConfigured(BancontactProduct.OnReceipt));
-        Assert.False(factory.IsConfigured(BancontactProduct.Invoice));
+        Assert.True(await factory.IsConfiguredAsync(BancontactProduct.StaticQr));
+        Assert.True(await factory.IsConfiguredAsync(BancontactProduct.OnDisplay));
+        Assert.False(await factory.IsConfiguredAsync(BancontactProduct.TopUp));
+        Assert.False(await factory.IsConfiguredAsync(BancontactProduct.OnReceipt));
+        Assert.False(await factory.IsConfiguredAsync(BancontactProduct.Invoice));
     }
 
     [Theory]
@@ -117,12 +141,14 @@ public class BancontactProServiceCollectionExtensionsTests
         var (provider, handler) = Build(BuildConfiguration());
         using var _p = provider;
 
-        await provider.GetRequiredService<IBancontactClientFactory>().Payments(product).CancelAsync("p1");
+        var payments = await provider.GetRequiredService<IBancontactClientFactory>().PaymentsAsync(product);
+        await payments.CancelAsync("p1");
 
         Assert.Equal("merchant.api.preprod.bancontact.net", handler.LastRequest!.RequestUri!.Host);
         Assert.Equal("Bearer", handler.LastRequest.Headers.Authorization?.Scheme);
         Assert.Equal(expectedApiKey, handler.LastRequest.Headers.Authorization?.Parameter);
         Assert.False(handler.LastRequest.Headers.Contains("Signature"));
+        Assert.StartsWith("BancontactPro.Net/", handler.LastRequest.Headers.UserAgent.ToString());
     }
 
     [Fact]
@@ -131,7 +157,8 @@ public class BancontactProServiceCollectionExtensionsTests
         var (provider, handler) = Build(BuildConfiguration(environment: "Production"));
         using var _p = provider;
 
-        await provider.GetRequiredService<IBancontactClientFactory>().Payments(BancontactProduct.StaticQr).CancelAsync("p1");
+        var payments = await provider.GetRequiredService<IBancontactClientFactory>().PaymentsAsync(BancontactProduct.StaticQr);
+        await payments.CancelAsync("p1");
 
         Assert.Equal("merchant.api.bancontact.net", handler.LastRequest!.RequestUri!.Host);
     }
@@ -142,7 +169,8 @@ public class BancontactProServiceCollectionExtensionsTests
         var (provider, handler) = Build(BuildConfiguration(withSigningKey: false));
         using var _p = provider;
 
-        await provider.GetRequiredService<IBancontactClientFactory>().Payments(BancontactProduct.StaticQr).CancelAsync("p1");
+        var payments = await provider.GetRequiredService<IBancontactClientFactory>().PaymentsAsync(BancontactProduct.StaticQr);
+        await payments.CancelAsync("p1");
 
         Assert.Equal("static-qr-key", handler.LastRequest!.Headers.Authorization?.Parameter);
     }
@@ -151,15 +179,15 @@ public class BancontactProServiceCollectionExtensionsTests
     [InlineData(BancontactProduct.TopUp)]
     [InlineData(BancontactProduct.OnReceipt)]
     [InlineData(BancontactProduct.Invoice)]
-    public void UnconfiguredProduct_EveryClientThrowsAndNothingIsSent(BancontactProduct product)
+    public async Task UnconfiguredProduct_EveryClientThrowsAndNothingIsSent(BancontactProduct product)
     {
         var (provider, handler) = Build(BuildConfiguration());
         using var _p = provider;
         var factory = provider.GetRequiredService<IBancontactClientFactory>();
 
-        var payments = Assert.Throws<BancontactProductNotConfiguredException>(() => factory.Payments(product));
-        var refunds = Assert.Throws<BancontactProductNotConfiguredException>(() => factory.Refunds(product));
-        var reconciliation = Assert.Throws<BancontactProductNotConfiguredException>(() => factory.Reconciliation(product));
+        var payments = await Assert.ThrowsAsync<BancontactProductNotConfiguredException>(() => factory.PaymentsAsync(product));
+        var refunds = await Assert.ThrowsAsync<BancontactProductNotConfiguredException>(() => factory.RefundsAsync(product));
+        var reconciliation = await Assert.ThrowsAsync<BancontactProductNotConfiguredException>(() => factory.ReconciliationAsync(product));
 
         Assert.All([payments, refunds, reconciliation], ex => Assert.Equal(product, ex.Product));
         Assert.Contains($"Products:{product}:ApiKey", payments.Message);
@@ -167,14 +195,14 @@ public class BancontactProServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void WithoutSigningKey_RefundAndReconciliationThrow()
+    public async Task WithoutSigningKey_RefundAndReconciliationThrow()
     {
         var (provider, _) = Build(BuildConfiguration(withSigningKey: false));
         using var _p = provider;
         var factory = provider.GetRequiredService<IBancontactClientFactory>();
 
-        var refunds = Assert.Throws<BancontactSigningKeyNotConfiguredException>(() => factory.Refunds(BancontactProduct.StaticQr));
-        Assert.Throws<BancontactSigningKeyNotConfiguredException>(() => factory.Reconciliation(BancontactProduct.StaticQr));
+        var refunds = await Assert.ThrowsAsync<BancontactSigningKeyNotConfiguredException>(() => factory.RefundsAsync(BancontactProduct.StaticQr));
+        await Assert.ThrowsAsync<BancontactSigningKeyNotConfiguredException>(() => factory.ReconciliationAsync(BancontactProduct.StaticQr));
         Assert.Contains("PrivateKeyPem", refunds.Message);
     }
 
@@ -186,7 +214,8 @@ public class BancontactProServiceCollectionExtensionsTests
 
         try
         {
-            await provider.GetRequiredService<IBancontactClientFactory>().Refunds(BancontactProduct.OnDisplay).GetAsync("p1", "r1");
+            var refunds = await provider.GetRequiredService<IBancontactClientFactory>().RefundsAsync(BancontactProduct.OnDisplay);
+            await refunds.GetAsync("p1", "r1");
         }
         catch (Exception)
         {

@@ -23,7 +23,7 @@ src/BancontactPro.Net/
 ├── Models/          DTOs shared across the three typed clients and the webhook payload
 ├── Http/            BancontactApiException + shared error-response handling
 ├── QrCodes/         PaymentLinkBuilder -- client-templated QR/deeplink URLs (no HTTP call)
-├── Helpers/         DI registration (BancontactProOptions, validator, service collection extensions)
+├── Helpers/         DI registration, the credentials provider, options + validator, endpoints, client factory
 └── BancontactJsonOptions.cs   The one JsonSerializerOptions every DTO in this library uses
 ```
 
@@ -75,8 +75,8 @@ no HTTP, fully unit-testable. `BancontactSigningHandler : DelegatingHandler` wra
 `HttpClient` pipeline: for every outgoing request it buffers the body, builds a fresh JOSE
 header (new `iat`/`jti` per request, `path` from the actual request URI), signs it, and sets
 both the `Signature` and `Authorization: Bearer {ApiKey}` headers before letting the request
-continue down the pipeline. It's registered as a message handler on the Refund and
-Reconciliation typed clients via DI (`Helpers/BancontactProServiceCollectionExtensions.cs`), so
+continue down the pipeline. The client factory (`Helpers/IBancontactClientFactory.cs`) puts it in front of the Refund and
+Reconciliation clients it creates, built per call from the current credentials (see "DI wiring"), so
 the typed clients themselves never deal with signing directly — they just issue ordinary
 relative-path HTTP calls.
 
@@ -110,7 +110,9 @@ Three layers, each independently testable:
    [callback guide](https://docs.bancontactpro.com/guides/general/callback052025): a new JWK is
    added 24h before an old one is removed, and Bancontact recommends caching JWKS for up to 12h
    and re-fetching on verification failure — refreshing reactively on a miss (rather than on a
-   fixed timer) satisfies that without needing a background refresh loop.
+   fixed timer) satisfies that without needing a background refresh loop. The endpoint and the cache
+   follow the provider's current environment, one cache per environment (see "The JWKS client follows
+   the environment" below), and the instance is long-lived: never build one per call.
 
 2. **`BancontactSignatureVerifier`** does the actual cryptographic and structural verification:
    splits the two segments, parses the JOSE header, rejects any `crit` entry it doesn't
@@ -145,7 +147,8 @@ qr image                          = {qr generator host}/qrcode?f={PNG|SVG}&s={S|
 ```
 
 The hosts depend on the environment, so every method takes a `BancontactEnvironment` (callers pass
-`BancontactProOptions.Environment`). The builder stays a static class rather than a DI service:
+`BancontactCredentials.Environment` from the provider, or `BancontactProOptions.Environment`).
+The builder stays a static class rather than a DI service:
 it needs nothing else from configuration, and a required parameter can't be forgotten the way an
 optional one defaulting to production could.
 
@@ -202,41 +205,69 @@ one the same way.
 
 ## DI wiring (`Helpers/BancontactProServiceCollectionExtensions.cs`)
 
-`AddBancontactProIntegration(IServiceCollection, IConfiguration)` mirrors the
-options/validator/service-collection-extensions/DelegatingHandler shape used elsewhere in the
-author's other .NET client libraries (see the commit history for the specific reference). In
-registration order:
+Two public registration methods share one core, so an application picks how its credentials reach
+the library without changing anything else:
 
-1. `BancontactProOptions` is bound from the `BancontactPro` configuration section and validated
-   via `BancontactProOptionsValidator` (`IValidateOptions<T>`) on first access — at least one
-   product under `Products`, each configured product with both its `ApiKey` and its
-   `MerchantProfileId` (an entry with both empty counts as not configured), `Kid` and
-   `PrivateKeyPem` together or not at all, plus an actual attempt to parse `PrivateKeyPem` as a
-   PEM-encoded EC key, so a malformed key
-   fails fast with a clear message instead of surfacing as a cryptic exception from deep inside
-   the first real signing attempt.
-2. `IRequestSigningKeyProvider` is built from those options; it throws
-   `BancontactSigningKeyNotConfiguredException` when no signing key is configured.
-3. `IOptions<JwksClientOptions>` picks the JWKS URL based on `BancontactProOptions.Environment`,
-   and `IJwksClient`/`JwksClient` is registered as a typed `HttpClient` (unauthenticated — fetching
-   Bancontact's own public keys doesn't require signing; that would be circular).
-4. `BancontactSignatureVerifier` and `BancontactCallbackVerifier` are registered as singletons.
-5. For every `BancontactProduct`, three named `HttpClient`s (`BancontactPro.Payments.<Product>`,
-   `.Refunds.<Product>`, `.Reconciliation.<Product>`) are registered against the
-   environment-appropriate merchant API host. The Payment one gets a `BancontactApiKeyHandler`
-   with that product's API key; the other two get a `BancontactSigningHandler` whose
-   `BancontactSigningOptions` carry that product's API key and PPID (the `sub` claim).
-6. `IBancontactClientFactory` (`Helpers/IBancontactClientFactory.cs`) is the public entry point:
-   `Payments(product)`, `Refunds(product)` and `Reconciliation(product)` first check the
-   configuration, throwing `BancontactProductNotConfiguredException` for a product without a
-   complete pair and `BancontactSigningKeyNotConfiguredException` for a signed client without a
-   key, and only then create the named `HttpClient` and wrap it in `PaymentClient`,
-   `RefundClient` or `ReconciliationClient`. Bancontact issues credentials per product type, which
-   is why a client is always bound to one product rather than resolved directly from DI.
+- `AddBancontactProIntegration(IServiceCollection, IConfiguration)` for static settings. It binds
+  `BancontactProOptions` from the `BancontactPro` section, validates it on startup, and then calls
+  `AddBancontactPro<ConfigurationCredentialsProvider>(ServiceLifetime.Singleton)`.
+- `AddBancontactPro<TProvider>()` and `AddBancontactPro(Func<IServiceProvider, IBancontactCredentialsProvider>)`
+  for a host that supplies its own `IBancontactCredentialsProvider`. They register no options and do no
+  validation, and resolve nothing at startup, so a host with nothing configured still starts.
 
-`BancontactEnvironment` (`Preprod` / `Production`, defaulting to `Preprod`) is the single switch
-that decides both the merchant API host and the JWKS host — see
-`BancontactProServiceCollectionExtensions.GetMerchantApiBaseUri`/`GetJwksUri`.
+The core registers, as singletons: `IBancontactClientFactory`, `IJwksClient`,
+`BancontactSignatureVerifier` and `BancontactCallbackVerifier`; plus two named `HttpClient`
+pipelines (`BancontactPro.Api` for the three API clients, `BancontactPro.Jwks` for the JWKS fetch).
+
+### Credentials are read per call, never captured
+
+`IBancontactCredentialsProvider.GetCredentialsAsync` returns a `BancontactCredentials` snapshot:
+the environment, the API key and PPID per product, the optional signing key and the `iss` claim.
+The factory and the JWKS client call it on every use. They get it through `CredentialsAccessor`,
+which opens a DI scope for the call, so the singletons can use a provider of any lifetime (a scoped
+one that depends on a DbContext, for example). The library caches nothing about credentials, so a
+provider that is expensive to read should cache briefly itself.
+
+Because `IHttpClientFactory` caches a named client's handler pipeline (two minutes by default) and
+fixes its `BaseAddress`, nothing credential-bearing may live there. So:
+
+- The `BancontactPro.Api` pipeline holds only the primary handler (plus whatever the host adds
+  with `ConfigureHttpClientDefaults`, such as resilience handlers).
+- On each call to `PaymentsAsync` / `RefundsAsync` / `ReconciliationAsync`, the factory reads the
+  snapshot, then builds a small `HttpClient` around that pipeline (`IHttpMessageHandlerFactory.CreateHandler`)
+  with its own `BancontactApiKeyHandler` (Payment) or `BancontactSigningHandler` (Refund,
+  Reconciliation), the `BaseAddress` from `BancontactEndpoints.GetMerchantApiBaseUri(environment)`, the
+  timeout and the user agent. Those are the same handlers as before, so the headers, the signing and
+  the JSON are unchanged; only where their inputs come from moved.
+- The returned client keeps the credentials it was created with. That is why callers ask for one per
+  operation rather than holding it.
+- Parsing a PEM costs more than a request needs, so the factory keeps the last parsed signing key,
+  keyed on its `kid` and PEM. A changed key misses the cache and replaces it.
+
+The factory checks the snapshot before creating a client: `BancontactProductNotConfiguredException`
+for a product without a complete pair, `BancontactSigningKeyNotConfiguredException` for a signed
+client without a key, and `InvalidOperationException` for a key that isn't a valid PEM. All three
+happen when the client is requested, so an unconfigured host fails only when the integration is used.
+Bancontact issues credentials per product type, which is why a client is always bound to one product
+rather than resolved directly from DI. The factory methods return `Task` because a provider may
+read a database; `ConfigurationCredentialsProvider` returns completed tasks.
+
+(The alternative, a synchronous factory with a handler that asks the provider inside `SendAsync`, was
+rejected: missing-credential errors would surface in the middle of a call instead of at client
+creation, `IsConfigured` could not be synchronous either, and the handler would have to rewrite the
+request URI to follow an environment switch.)
+
+### The JWKS client follows the environment
+
+`BancontactEnvironment` (`Preprod` / `Production`, defaulting to `Preprod`) decides both the merchant
+API host and the JWKS host; `BancontactEndpoints` is the one place that maps it to addresses.
+`JwksClient` asks the provider for the environment on every `GetKeyAsync`, fetches from
+`BancontactEndpoints.GetJwksUri(environment)`, and keeps one key cache and one in-flight refresh per
+environment. Switching the environment at runtime therefore needs no restart, and one environment's
+keys are never used for the other. The cache lives in the instance, so the registrations keep a single
+long-lived `JwksClient` (the typed-client default would have been transient, and every consumer would
+have had its own cache). Each fetch takes a fresh `HttpClient` from `BancontactPro.Jwks`, so the
+pooled handlers still rotate; a consumer must not construct a `JwksClient` per call.
 
 ## Notable spec quirks encountered (and how they're handled)
 

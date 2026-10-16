@@ -377,10 +377,14 @@ slug), gives the actual old→new URL table the generic per-page banners never s
 
 The QR-code-image generator host itself (`https://qrcodegenerator.api.bancontact.net/qrcode?...`,
 production; preprod has its own, see below)
-is **not** changing — only the `c=` payload URL embedded inside it. Already live in
-pre-production; rolls out to production **2026-11-05**. Printed QR codes using the old
-`payconiq.com` URLs keep working only **until 2026-06-15** — after that, old-domain codes may
-stop working, which matters for anything physically printed (Static QR at a till, On a Receipt).
+is **not** changing — only the `c=` payload URL embedded inside it. Live in pre-production, and in
+production **from 11 May 2026**. Printed QR codes using the old `payconiq.com` URLs stayed valid
+**until 15 June 2026**; that date has passed, so old-domain codes may have stopped working, which
+matters for anything physically printed (Static QR at a till, On a Receipt).
+
+**Dates on that page are written dd/mm/yyyy** ("released in production from 11/05/2026", "valid
+until 15/06/2026"; the 15 can only be a day). An earlier version of these notes read the first as
+mm/dd and recorded 5 November 2026; corrected 2026-10-16 against the page itself.
 
 **Quirk to remember**: for the time being, URLs the *API itself* returns in pre-production use
 `pay.acc.bancontact.net`, not the `pay.preprod.bancontact.net` pattern you'd expect by analogy

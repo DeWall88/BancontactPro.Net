@@ -12,7 +12,7 @@
     <Authors>DeWall88</Authors>
     <Copyright>© 2026 DeWall88</Copyright>
     <Description>A strongly-typed .NET 10 client for the Bancontact Pro Merchant APIs (Payment, Refund, Reconciliation) and its QR products (On a Display, On a Receipt, Static QR, Top Up, Invoice): per-product credentials, JWS-signed refund and reconciliation calls, JWKS-verified callbacks, QR payload URLs, and dependency injection registration.</Description>
-    <PackageReleaseNotes>First release. Payment, Refund and Reconciliation APIs (v3); per-product API key and PPID through IBancontactClientFactory; callback verification against Bancontact's JWKS; PaymentLinkBuilder for QR payload URLs. Payment creation verified against Bancontact's pre-production environment.</PackageReleaseNotes>
+    <PackageReleaseNotes>Credentials now come from an IBancontactCredentialsProvider, read on every call: AddBancontactPro (generic or factory overload) for hosts that supply their own, with no startup validation, nothing captured and a JWKS client that follows the environment; AddBancontactProIntegration(IConfiguration) for static settings. IBancontactClientFactory is asynchronous. New BancontactEndpoints; PaymentLinkBuilder builds QR payload URLs for the configured environment. Payment, Refund and Reconciliation APIs (v3); per-product API key and PPID; callback verification against the Bancontact JWKS. Payment creation verified against the pre-production environment.</PackageReleaseNotes>
     <PackageTags>bancontact;bancontactpro;payconiq;payments;belgium;qr;client;webhooks;jws</PackageTags>
 
     <!-- Repository and project links -->
