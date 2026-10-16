@@ -8,8 +8,9 @@ public sealed class BancontactProductNotConfiguredException : InvalidOperationEx
 {
     /// <param name="product">The product that was requested.</param>
     public BancontactProductNotConfiguredException(BancontactProduct product)
-        : base($"Bancontact product '{product}' is not configured. Set both BancontactPro:Products:{product}:ApiKey and " +
-               $"BancontactPro:Products:{product}:MerchantProfileId (the API key and PPID Bancontact issued for this product).")
+        : base($"Bancontact product '{product}' is not configured: it needs both its ApiKey and its MerchantProfileId (PPID), the pair " +
+               $"Bancontact issued for this product. In configuration these are BancontactPro:Products:{product}:ApiKey and " +
+               $"BancontactPro:Products:{product}:MerchantProfileId; a custom IBancontactCredentialsProvider supplies them in BancontactCredentials.Products.")
     {
         Product = product;
     }
@@ -26,9 +27,9 @@ public sealed class BancontactSigningKeyNotConfiguredException : InvalidOperatio
 {
     /// <summary>Creates the exception with a message that says what to configure.</summary>
     public BancontactSigningKeyNotConfiguredException()
-        : base("The Refund and Reconciliation APIs require a signed request. Configure BancontactPro:Kid and " +
-               "BancontactPro:PrivateKeyPem, and host the public key as a JWKS whose URL is shared with Bancontact. " +
-               "The Payment API works with a product's API key alone.")
+        : base("The Refund and Reconciliation APIs require a signed request. Configure a signing key (BancontactPro:Kid and " +
+               "BancontactPro:PrivateKeyPem, or BancontactCredentials.SigningKey from a custom provider) and host the public key " +
+               "as a JWKS whose URL is shared with Bancontact. The Payment API works with a product's API key alone.")
     {
     }
 }

@@ -7,7 +7,6 @@ using BancontactPro.Models;
 using BancontactPro.QrCodes;
 using BancontactPro.Refunds;
 using BancontactPro.Webhooks;
-using Microsoft.Extensions.Options;
 
 namespace BancontactPro.Sample.Api;
 
@@ -16,6 +15,9 @@ public partial class Program
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        // Static settings (environment variables, user secrets, appsettings), validated when the app starts. A host whose
+        // credentials change at runtime, or that must start with none, registers an IBancontactCredentialsProvider with
+        // AddBancontactPro<TProvider>() instead: see docs/getting-started.md, "Register the integration".
         builder.Services.AddBancontactProIntegration(builder.Configuration);
         builder.Services.AddSingleton<CallbackLog>();
         // Enums as names ("SUCCEEDED", "EUR") in requests and responses, as Bancontact writes them.
@@ -30,7 +32,7 @@ public partial class Program
 /// <summary>
 /// A pass-through over the library: every route calls exactly one library method, which calls exactly one
 /// Bancontact endpoint. Routes are Bancontact's own paths with the product in front, e.g.
-/// <c>POST /OnDisplay/v3/payments</c> → <c>clients.Payments(OnDisplay).CreateAsync</c> →
+/// <c>POST /OnDisplay/v3/payments</c> → <c>clients.PaymentsAsync(OnDisplay)</c> then <c>CreateAsync</c> →
 /// <c>POST https://merchant.api…/v3/payments</c> with On Display's API key. Bodies are Bancontact's own request
 /// and response shapes, and Bancontact's errors come back with their status, code and trace ID.
 /// Which product uses which call is Bancontact's documentation's business (see docs/getting-started.md), not
@@ -91,36 +93,36 @@ public static class SampleEndpoints
     {
         routes.MapPost("/v3/payments", async (string product, CreatePaymentRequest body, IBancontactClientFactory clients, IConfiguration config, HttpContext http, CancellationToken ct) =>
         {
-            var created = await clients.Payments(ParseProduct(product)).CreateAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
+            var created = await (await clients.PaymentsAsync(ParseProduct(product), ct)).CreateAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
             return Results.Json(created, statusCode: StatusCodes.Status201Created);
         });
 
         routes.MapPost("/v3/payments/pos", async (string product, CreateStaticQrPaymentRequest body, IBancontactClientFactory clients, IConfiguration config, HttpContext http, CancellationToken ct) =>
         {
-            var created = await clients.Payments(ParseProduct(product)).CreateStaticQrPaymentAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
+            var created = await (await clients.PaymentsAsync(ParseProduct(product), ct)).CreateStaticQrPaymentAsync(body with { CallbackUrl = body.CallbackUrl ?? DefaultCallbackUrl(config, http) }, ct);
             return Results.Json(created, statusCode: StatusCodes.Status201Created);
         });
 
         routes.MapGet("/v3/payments/{paymentId}", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Payments(ParseProduct(product)).GetAsync(paymentId, ct)));
+            Results.Ok(await (await clients.PaymentsAsync(ParseProduct(product), ct)).GetAsync(paymentId, ct)));
 
         routes.MapDelete("/v3/payments/{paymentId}", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
         {
-            await clients.Payments(ParseProduct(product)).CancelAsync(paymentId, ct);
+            await (await clients.PaymentsAsync(ParseProduct(product), ct)).CancelAsync(paymentId, ct);
             return Results.NoContent();
         });
 
         routes.MapPost("/v3/payments/search", async (string product, PaymentSearchQuery body, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Payments(ParseProduct(product)).SearchAsync(body, page, size, ct)));
+            Results.Ok(await (await clients.PaymentsAsync(ParseProduct(product), ct)).SearchAsync(body, page, size, ct)));
 
         routes.MapPost("/v3/payments/{paymentId}/acknowledge", async (string product, string paymentId, PaymentAcknowledgeRequest body, IBancontactClientFactory clients, CancellationToken ct) =>
         {
-            await clients.Payments(ParseProduct(product)).AcknowledgeAsync(paymentId, body, ct);
+            await (await clients.PaymentsAsync(ParseProduct(product), ct)).AcknowledgeAsync(paymentId, body, ct);
             return Results.NoContent();
         });
 
         routes.MapGet("/v3/payments/{paymentId}/debtor/refundIban", async (string product, string paymentId, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Payments(ParseProduct(product)).GetDebtorRefundIbanAsync(paymentId, ct)));
+            Results.Ok(await (await clients.PaymentsAsync(ParseProduct(product), ct)).GetDebtorRefundIbanAsync(paymentId, ct)));
     }
 
     private static void MapRefunds(RouteGroupBuilder routes)
@@ -134,41 +136,43 @@ public static class SampleEndpoints
                     "Creating a refund needs an Idempotency-Key header: generate one per refund attempt and reuse it when retrying.");
             }
 
-            var created = await clients.Refunds(ParseProduct(product)).CreateAsync(paymentId, body, idempotencyKey, ct);
+            var created = await (await clients.RefundsAsync(ParseProduct(product), ct)).CreateAsync(paymentId, body, idempotencyKey, ct);
             return Results.Json(created, statusCode: StatusCodes.Status201Created);
         });
 
         routes.MapGet("/v3/payments/{paymentId}/refunds/{refundId}", async (string product, string paymentId, string refundId, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Refunds(ParseProduct(product)).GetAsync(paymentId, refundId, ct)));
+            Results.Ok(await (await clients.RefundsAsync(ParseProduct(product), ct)).GetAsync(paymentId, refundId, ct)));
     }
 
     private static void MapReconciliation(RouteGroupBuilder routes)
     {
         routes.MapGet("/v3/reconciliation/payouts", async (string product, DateOnly? date, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetPayoutsAsync(date, page, size, ct)));
+            Results.Ok(await (await clients.ReconciliationAsync(ParseProduct(product), ct)).GetPayoutsAsync(date, page, size, ct)));
 
         routes.MapGet("/v3/reconciliation/payments", async (string product, string? payoutId, DateOnly? startDate, DateOnly? endDate, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetPaymentsAsync(payoutId, startDate, endDate, page, size, ct)));
+            Results.Ok(await (await clients.ReconciliationAsync(ParseProduct(product), ct)).GetPaymentsAsync(payoutId, startDate, endDate, page, size, ct)));
 
         routes.MapGet("/v3/reconciliation/refunds", async (string product, string? payoutId, DateOnly? startDate, DateOnly? endDate, int? page, int? size, IBancontactClientFactory clients, CancellationToken ct) =>
-            Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetRefundsAsync(payoutId, startDate, endDate, page, size, ct)));
+            Results.Ok(await (await clients.ReconciliationAsync(ParseProduct(product), ct)).GetRefundsAsync(payoutId, startDate, endDate, page, size, ct)));
     }
 
     // Not API calls: PaymentLinkBuilder builds the QR payload URLs Bancontact's guides describe, with the product's PPID,
     // on the hosts of the configured environment.
     private static void MapQrCodes(RouteGroupBuilder routes)
     {
-        routes.MapGet("/qr/payment-url", (string product, long? amount, string? description, string? reference, string? format, string? size, IOptions<BancontactProOptions> options) =>
+        routes.MapGet("/qr/payment-url", async (string product, long? amount, string? description, string? reference, string? format, string? size, IBancontactCredentialsProvider credentialsProvider, CancellationToken ct) =>
         {
-            var environment = options.Value.Environment;
-            var payloadUrl = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(environment, Ppid(options.Value, ParseProduct(product)), amount, description, reference);
+            var credentials = await credentialsProvider.GetCredentialsAsync(ct);
+            var environment = credentials.Environment;
+            var payloadUrl = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(environment, Ppid(credentials, ParseProduct(product)), amount, description, reference);
             return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payloadUrl, ParseFormat(format), ParseSize(size))));
         });
 
-        routes.MapGet("/qr/pos/{posId}", (string product, string posId, string? format, string? size, IOptions<BancontactProOptions> options) =>
+        routes.MapGet("/qr/pos/{posId}", async (string product, string posId, string? format, string? size, IBancontactCredentialsProvider credentialsProvider, CancellationToken ct) =>
         {
-            var environment = options.Value.Environment;
-            var payloadUrl = PaymentLinkBuilder.BuildStaticQrLocationUrl(environment, Ppid(options.Value, ParseProduct(product)), posId);
+            var credentials = await credentialsProvider.GetCredentialsAsync(ct);
+            var environment = credentials.Environment;
+            var payloadUrl = PaymentLinkBuilder.BuildStaticQrLocationUrl(environment, Ppid(credentials, ParseProduct(product)), posId);
             return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payloadUrl, ParseFormat(format), ParseSize(size))));
         });
     }
@@ -184,8 +188,8 @@ public static class SampleEndpoints
     private static string DefaultCallbackUrl(IConfiguration config, HttpContext http) =>
         (config["PublicBaseUrl"]?.TrimEnd('/') ?? $"{http.Request.Scheme}://{http.Request.Host}") + CallbackPath;
 
-    private static string Ppid(BancontactProOptions options, BancontactProduct product) =>
-        options.GetCredentials(product)?.MerchantProfileId ?? throw new BancontactProductNotConfiguredException(product);
+    private static string Ppid(BancontactCredentials credentials, BancontactProduct product) =>
+        credentials.GetCredentials(product)?.MerchantProfileId ?? throw new BancontactProductNotConfiguredException(product);
 
     private static BancontactProduct ParseProduct(string value) =>
         Enum.TryParse<BancontactProduct>(value, ignoreCase: true, out var product) && Enum.IsDefined(product)

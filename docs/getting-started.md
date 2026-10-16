@@ -154,30 +154,111 @@ every client and the JWKS fetcher talk to (`merchant.api.preprod.bancontact.net`
 
 ## 5. Register the integration
 
+There are two ways to register, over one shared core (the JWKS client, the callback verifier and
+`IBancontactClientFactory`). Use one of them, not both:
+
+| | `AddBancontactProIntegration(configuration)` | `AddBancontactPro<TProvider>()` |
+|---|---|---|
+| Use it when | The settings are static: appsettings, environment variables, user secrets. The sample uses it. | The host keeps its credentials somewhere that changes at runtime (a database, an admin page), or must start with none configured |
+| Credentials come from | `BancontactProOptions`, bound once from the `BancontactPro` section (step 4) | Your `IBancontactCredentialsProvider`, asked on every call |
+| At startup | Validated: the host does not start without a configured product | Nothing is read or validated |
+| Nothing configured | The host fails to start | The host starts; clients report "not configured" when used |
+| A change of credentials or environment applies | After a restart | To the next call |
+
+### From configuration
+
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddBancontactProIntegration(builder.Configuration);
 ```
 
-This single call registers everything: the JWKS client, the callback verifier, and
-`IBancontactClientFactory`, which hands out clients bound to one product:
+Configuration is validated on startup: no product configured, a product with only half its
+pair, half a signing key (`Kid` without `PrivateKeyPem` or the other way round), or an
+unparseable `PrivateKeyPem` throws `OptionsValidationException` with a specific message rather
+than failing confusingly later on the first real API call. Internally this registers
+`ConfigurationCredentialsProvider`, an `IBancontactCredentialsProvider` that reads
+`IOptions<BancontactProOptions>`, and then does what the next section does.
+
+### From your own credentials provider
+
+A host that edits its credentials at runtime (an admin settings page over a database, say) and
+must start even when nothing is configured implements `IBancontactCredentialsProvider`. It
+returns a `BancontactCredentials`: the environment, the API key and PPID per product, the
+optional signing key (`Kid` and `PrivateKeyPem`), and the `iss` claim (default `Payconiq`).
 
 ```csharp
-IPaymentClient paymentClient = clients.Payments(BancontactProduct.OnDisplay);               // sends that product's API key
-IRefundClient refundClient = clients.Refunds(BancontactProduct.OnDisplay);                  // signed, with that product's PPID
-IReconciliationClient reconciliationClient = clients.Reconciliation(BancontactProduct.OnDisplay);
+public sealed class DatabaseCredentialsProvider(SettingsDbContext db) : IBancontactCredentialsProvider
+{
+    public async Task<BancontactCredentials> GetCredentialsAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await db.BancontactSettings.AsNoTracking().SingleOrDefaultAsync(cancellationToken);
+        if (settings is null)
+        {
+            return new BancontactCredentials(); // nothing configured: the site still starts
+        }
+
+        return new BancontactCredentials
+        {
+            Environment = settings.UseProduction ? BancontactEnvironment.Production : BancontactEnvironment.Preprod,
+            SigningKey = settings.Kid is { Length: > 0 } kid && settings.PrivateKeyPem is { Length: > 0 } pem
+                ? new BancontactSigningKey(kid, pem)
+                : null,
+            Products = settings.Products.ToDictionary(
+                product => product.Product,
+                product => new BancontactProductCredentials { ApiKey = product.ApiKey, MerchantProfileId = product.Ppid }),
+        };
+    }
+}
+
+builder.Services.AddBancontactPro<DatabaseCredentialsProvider>(); // or AddBancontactPro(sp => ...) with a factory
+```
+
+This registration reads nothing at startup. The library asks the provider each time it creates a
+client or needs to verify a callback, and keeps nothing in between, so a change takes effect on the next call. It
+resolves the provider in a scope of its own for each call, so a scoped provider (the default
+lifetime) can use a DbContext; pass `ServiceLifetime.Singleton` for a provider that caches. The
+library does not cache the result: if reading your credentials is expensive, cache them in the
+provider for a short time.
+
+Registering a provider also means there is no `IOptions<BancontactProOptions>` to inject. Where
+you need the environment or a PPID (to build a QR payload, say), ask the provider:
+`(await provider.GetCredentialsAsync()).Environment`. `IBancontactCredentialsProvider` is
+resolvable in both modes.
+
+When nothing is configured, `IsConfiguredAsync(product)` is `false` for every product, and asking for a client
+throws as described below, only at that point.
+
+### Getting clients
+
+`IBancontactClientFactory` hands out clients bound to one product:
+
+```csharp
+IPaymentClient paymentClient = await clients.PaymentsAsync(BancontactProduct.OnDisplay);               // sends that product's API key
+IRefundClient refundClient = await clients.RefundsAsync(BancontactProduct.OnDisplay);                  // signed, with that product's PPID
+IReconciliationClient reconciliationClient = await clients.ReconciliationAsync(BancontactProduct.OnDisplay);
 ```
 
 The snippets below use those three variables. A payment belongs to the product it was created
 with, so fetch, cancel and refund it with clients for that same product.
 
-Configuration is validated on first access: no product configured, a product with only half its
-pair, half a signing key (`Kid` without `PrivateKeyPem` or the other way round), or an
-unparseable `PrivateKeyPem` throws `OptionsValidationException` with a specific message rather
-than failing confusingly later on the first real API call. Asking for a client of a product
-without a complete pair throws `BancontactProductNotConfiguredException`; asking for a Refund or
-Reconciliation client without a signing key throws `BancontactSigningKeyNotConfiguredException`.
-Both say which settings are missing, and nothing is sent to Bancontact.
+Every call reads the provider, so ask the factory for a client when you need one instead of
+keeping it: a client keeps the credentials and the environment (the base address) it was created
+with, which is what lets the next one see a change. The factory methods are asynchronous because a
+provider may read a database. Asking for a client of a product without a complete pair throws
+`BancontactProductNotConfiguredException`; asking for a Refund or Reconciliation client without a signing
+key throws `BancontactSigningKeyNotConfiguredException`. Both say which settings are missing, and
+nothing is sent to Bancontact. A signing key that isn't a valid PEM-encoded EC key throws
+`InvalidOperationException` when a Refund or Reconciliation client is requested (in configuration mode
+startup validation catches it earlier).
+
+### The JWKS client
+
+`IJwksClient` caches Bancontact's public keys in the instance, and both registrations register one
+long-lived (singleton) instance, which `BancontactCallbackVerifier` uses. Never create a
+`JwksClient` per call or per request: every callback would fetch the JWKS again. It follows the
+provider's environment, with a separate key cache for each, so switching between `Preprod` and
+`Production` at runtime needs no restart. `BancontactEndpoints.GetMerchantApiBaseUri(environment)` and
+`GetJwksUri(environment)` give the addresses the clients use.
 
 ## Which product uses which call
 
@@ -186,8 +267,8 @@ product guides do. In short:
 
 | Product | How a payment starts | Library call | How you learn the outcome |
 |---|---|---|---|
-| [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4) | One payment per sale, its QR code shown on a screen; valid **120 seconds** | `clients.Payments(OnDisplay).CreateAsync` → `POST /v3/payments` | Callback; `GetAsync` as the fallback |
-| [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4) | A sticker per till, printed once (`PaymentLinkBuilder.BuildStaticQrLocationUrl`); per sale, a payment created just before the customer scans; valid **120 seconds** | `clients.Payments(StaticQr).CreateStaticQrPaymentAsync` → `POST /v3/payments/pos` with the till's `posId` | Callback; `GetAsync` as the fallback |
+| [On a Display](https://docs.bancontactpro.com/guides/instore/ondisplay052025v4) | One payment per sale, its QR code shown on a screen; valid **120 seconds** | `(await clients.PaymentsAsync(OnDisplay)).CreateAsync` → `POST /v3/payments` | Callback; `GetAsync` as the fallback |
+| [Static QR](https://docs.bancontactpro.com/guides/instore/staticqr052025v4) | A sticker per till, printed once (`PaymentLinkBuilder.BuildStaticQrLocationUrl`); per sale, a payment created just before the customer scans; valid **120 seconds** | `(await clients.PaymentsAsync(StaticQr)).CreateStaticQrPaymentAsync` → `POST /v3/payments/pos` with the till's `posId` | Callback; `GetAsync` as the fallback |
 | [On a Receipt](https://docs.bancontactpro.com/guides/instore/receipt052025v4) | A QR code printed on the receipt, built locally | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Callback to the URL configured on the product; the payment ID first appears there |
 | [Top Up](https://docs.bancontactpro.com/guides/online/topup052025v4) | Same as On a Receipt. Top Up needs a callback URL configured on the product by Bancontact | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Same as On a Receipt |
 | [Invoice](https://docs.bancontactpro.com/guides/invoice/invoice052025v4) | Same as On a Receipt; the guide says Bancontact no longer offers it directly | None: `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` | Same as On a Receipt |
@@ -212,7 +293,7 @@ public class PaymentService(IBancontactClientFactory clients)
 {
     public async Task<string> CreateAsync(long amountInCents, string orderReference)
     {
-        var paymentClient = clients.Payments(BancontactProduct.OnDisplay);
+        var paymentClient = await clients.PaymentsAsync(BancontactProduct.OnDisplay);
 
         var request = new CreatePaymentRequest(
             Amount: amountInCents,
@@ -239,6 +320,20 @@ just rely on the payment reaching a terminal status (see step 8) rather than tim
 `Links.Self` is the polling URL — it is **not** the QR code; `Links.Qrcode` is. `Links.Checkout`
 is also present on the response, but it's a hosted-checkout-page URL primarily meaningful for
 the discontinued Online Sales product — you likely don't need it for an in-store QR product.
+
+**A timed-out create has an unknown outcome.** If `POST /v3/payments` (or `POST /v3/payments/pos`
+in step 11) times out, or the connection drops before a response arrives, Bancontact may well have
+created the payment. Don't retry blindly: you could end up with two payments for one sale. Look
+the payment up by the reference you sent first (`POST /v3/payments/search`), and only create
+another if there is none:
+
+```csharp
+var found = await paymentClient.SearchAsync(new PaymentSearchQuery(Reference: orderReference));
+```
+
+This only works when every attempt carries a `Reference` that identifies it, so always set one on
+creates. The library's HTTP timeout is 100 seconds. Static QR payments also replace the till's
+active payment (step 11), so a blind retry there invalidates the first one.
 
 ## 7. Handle the webhook callback
 
@@ -340,7 +435,8 @@ For in-person/POS integrations rather than online checkout. Corresponds to `POST
 [Payment API spec](https://docs.bancontactpro.com/_bundle/apis/merchant-payment.openapi.json):
 
 ```csharp
-var payment = await clients.Payments(BancontactProduct.StaticQr).CreateStaticQrPaymentAsync(
+var staticQrClient = await clients.PaymentsAsync(BancontactProduct.StaticQr);
+var payment = await staticQrClient.CreateStaticQrPaymentAsync(
     new CreateStaticQrPaymentRequest(Amount: 1000, PosId: "till-1", ShopName: "My Shop"));
 ```
 
@@ -356,8 +452,8 @@ REST call that returns them. See
 [architecture.md](architecture.md#qr-and-deeplink-url-templating-on-a-receipt-top-up-static-qr)
 for why this is structurally different from steps 6 and 11 above.
 
-Every `PaymentLinkBuilder` method takes the environment to build for. Pass the configured
-`BancontactProOptions.Environment` (from `IOptions<BancontactProOptions>`), so the QR codes match
+Every `PaymentLinkBuilder` method takes the environment to build for. Pass the current
+`BancontactCredentials.Environment` (from `IBancontactCredentialsProvider`, which both registrations provide), so the QR codes match
 the API you call:
 
 | Environment | Payload host | QR image generator |
@@ -373,7 +469,8 @@ environment.
 For On a Receipt or Top Up (a fresh QR per transaction, amount baked in):
 
 ```csharp
-var environment = options.Value.Environment; // IOptions<BancontactProOptions>
+var credentials = await credentialsProvider.GetCredentialsAsync(); // IBancontactCredentialsProvider
+var environment = credentials.Environment;
 
 var payload = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(
     environment,
@@ -457,9 +554,9 @@ if this has aged):
 | `BancontactApiException` | any client method | Bancontact returned a non-success HTTP status. Carries `StatusCode`, `Code`, `Message`, and (Payment API only) `TraceId`/`SpanId` for support requests. A body that isn't Bancontact's `{code, message}` shape (e.g. a gateway's 401) is kept verbatim in `Message`. |
 | `RefundIdempotencyConflictException` | `IRefundClient.CreateAsync` | The `Idempotency-Key` was reused with different refund parameters — a caller bug, not transient. |
 | `InvalidCallbackException` | `BancontactCallbackVerifier.VerifyAndParseAsync` | The callback's signature didn't verify, or its body didn't match the expected schema. |
-| `OptionsValidationException` | first access of `BancontactProOptions` | No product is configured, a product has only half its API key and PPID pair, only half of the signing key (`Kid`/`PrivateKeyPem`) is set, or `PrivateKeyPem` isn't a parseable PEM-encoded EC key. |
-| `BancontactProductNotConfiguredException` | `IBancontactClientFactory.Payments`/`Refunds`/`Reconciliation` | The product has no complete API key and PPID pair. `Product` says which one. |
-| `BancontactSigningKeyNotConfiguredException` | `IBancontactClientFactory.Refunds`/`Reconciliation` | No signing key is configured. Those APIs accept only signed requests. |
+| `OptionsValidationException` | host startup (or first access of `BancontactProOptions`), configuration mode only | No product is configured, a product has only half its API key and PPID pair, only half of the signing key (`Kid`/`PrivateKeyPem`) is set, or `PrivateKeyPem` isn't a parseable PEM-encoded EC key. |
+| `BancontactProductNotConfiguredException` | `IBancontactClientFactory.PaymentsAsync`/`RefundsAsync`/`ReconciliationAsync` | The product has no complete API key and PPID pair. `Product` says which one. |
+| `BancontactSigningKeyNotConfiguredException` | `IBancontactClientFactory.RefundsAsync`/`ReconciliationAsync` | No signing key is configured. Those APIs accept only signed requests. |
 
 ### 401 Unauthorized from Bancontact
 
