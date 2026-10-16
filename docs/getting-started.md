@@ -356,16 +356,33 @@ REST call that returns them. See
 [architecture.md](architecture.md#qr-and-deeplink-url-templating-on-a-receipt-top-up-static-qr)
 for why this is structurally different from steps 6 and 11 above.
 
+Every `PaymentLinkBuilder` method takes the environment to build for. Pass the configured
+`BancontactProOptions.Environment` (from `IOptions<BancontactProOptions>`), so the QR codes match
+the API you call:
+
+| Environment | Payload host | QR image generator |
+|---|---|---|
+| `Production` | `https://pay.bancontact.net` | `https://qrcodegenerator.api.bancontact.net` |
+| `Preprod` | `https://pay.acc.bancontact.net` | `https://qrcodegenerator.api.preprod.bancontact.net` |
+
+The guides only show the production hosts. The preprod ones are those in the links Bancontact's
+own preprod API returns (see [research-notes.md](research-notes.md)). The production generator
+answers 400 for a `pay.acc` payload, so build the payload and the image URL for the same
+environment.
+
 For On a Receipt or Top Up (a fresh QR per transaction, amount baked in):
 
 ```csharp
+var environment = options.Value.Environment; // IOptions<BancontactProOptions>
+
 var payload = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(
+    environment,
     productProfileId: "your-ppid",
     amountCents: 250,
     description: "Coffee",
     reference: orderReference);
 
-var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(payload, QrCodeImageFormat.PNG, QrCodeImageSize.M);
+var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payload, QrCodeImageFormat.PNG, QrCodeImageSize.M);
 ```
 
 Omit `amountCents` for Top Up's "open value" QR type (the payer enters the amount themselves) —
@@ -376,8 +393,8 @@ For Static QR's printed code (a one-time setup step, separate from
 `CreateStaticQrPaymentAsync` in step 11, which attaches the actual amount per transaction):
 
 ```csharp
-var payload = PaymentLinkBuilder.BuildStaticQrLocationUrl(productProfileId: "your-ppid", posId: "till-1");
-var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(payload, QrCodeImageFormat.SVG);
+var payload = PaymentLinkBuilder.BuildStaticQrLocationUrl(environment, productProfileId: "your-ppid", posId: "till-1");
+var qrImageUrl = PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payload, QrCodeImageFormat.SVG);
 ```
 
 Print `qrImageUrl` once; from then on, each sale at that till calls `CreateStaticQrPaymentAsync`

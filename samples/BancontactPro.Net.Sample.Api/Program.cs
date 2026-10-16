@@ -154,19 +154,22 @@ public static class SampleEndpoints
             Results.Ok(await clients.Reconciliation(ParseProduct(product)).GetRefundsAsync(payoutId, startDate, endDate, page, size, ct)));
     }
 
-    // Not API calls: PaymentLinkBuilder builds the QR payload URLs Bancontact's guides describe, with the product's PPID.
+    // Not API calls: PaymentLinkBuilder builds the QR payload URLs Bancontact's guides describe, with the product's PPID,
+    // on the hosts of the configured environment.
     private static void MapQrCodes(RouteGroupBuilder routes)
     {
         routes.MapGet("/qr/payment-url", (string product, long? amount, string? description, string? reference, string? format, string? size, IOptions<BancontactProOptions> options) =>
         {
-            var payloadUrl = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(Ppid(options.Value, ParseProduct(product)), amount, description, reference);
-            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(payloadUrl, ParseFormat(format), ParseSize(size))));
+            var environment = options.Value.Environment;
+            var payloadUrl = PaymentLinkBuilder.BuildFixedAmountPaymentUrl(environment, Ppid(options.Value, ParseProduct(product)), amount, description, reference);
+            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payloadUrl, ParseFormat(format), ParseSize(size))));
         });
 
         routes.MapGet("/qr/pos/{posId}", (string product, string posId, string? format, string? size, IOptions<BancontactProOptions> options) =>
         {
-            var payloadUrl = PaymentLinkBuilder.BuildStaticQrLocationUrl(Ppid(options.Value, ParseProduct(product)), posId);
-            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(payloadUrl, ParseFormat(format), ParseSize(size))));
+            var environment = options.Value.Environment;
+            var payloadUrl = PaymentLinkBuilder.BuildStaticQrLocationUrl(environment, Ppid(options.Value, ParseProduct(product)), posId);
+            return Results.Ok(new QrCodeLinks(payloadUrl, PaymentLinkBuilder.BuildQrCodeImageUrl(environment, payloadUrl, ParseFormat(format), ParseSize(size))));
         });
     }
 

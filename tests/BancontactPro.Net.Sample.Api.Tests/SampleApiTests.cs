@@ -227,9 +227,10 @@ public sealed class SampleApiTests : IClassFixture<SampleApiTests.SampleApiFacto
         var response = await Client().GetAsync("/OnDisplay/qr/payment-url?amount=1000&description=Receipt%20Payment&reference=r-1&size=XL");
         using var links = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
+        // No Environment configured: Preprod, the library's default.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("https://pay.bancontact.net/t/1/on-display-ppid?D=Receipt%20Payment&A=1000&R=r-1", links.RootElement.GetProperty("payloadUrl").GetString());
-        Assert.StartsWith("https://qrcodegenerator.api.bancontact.net/qrcode?f=PNG&s=XL&c=", links.RootElement.GetProperty("qrCodeImageUrl").GetString());
+        Assert.Equal("https://pay.acc.bancontact.net/t/1/on-display-ppid?D=Receipt%20Payment&A=1000&R=r-1", links.RootElement.GetProperty("payloadUrl").GetString());
+        Assert.StartsWith("https://qrcodegenerator.api.preprod.bancontact.net/qrcode?f=PNG&s=XL&c=", links.RootElement.GetProperty("qrCodeImageUrl").GetString());
         Assert.Empty(_factory.Bancontact.Requests);
     }
 
@@ -239,8 +240,24 @@ public sealed class SampleApiTests : IClassFixture<SampleApiTests.SampleApiFacto
         var response = await Client().GetAsync("/StaticQr/qr/pos/till-1?format=svg");
         using var links = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
-        Assert.Equal("https://pay.bancontact.net/l/1/static-qr-ppid/till-1", links.RootElement.GetProperty("payloadUrl").GetString());
-        Assert.StartsWith("https://qrcodegenerator.api.bancontact.net/qrcode?f=SVG&c=", links.RootElement.GetProperty("qrCodeImageUrl").GetString());
+        Assert.Equal("https://pay.acc.bancontact.net/l/1/static-qr-ppid/till-1", links.RootElement.GetProperty("payloadUrl").GetString());
+        Assert.StartsWith("https://qrcodegenerator.api.preprod.bancontact.net/qrcode?f=SVG&c=", links.RootElement.GetProperty("qrCodeImageUrl").GetString());
+    }
+
+    [Fact]
+    public async Task QrCodes_InProduction_UseTheProductionHosts()
+    {
+        using var production = _factory.WithWebHostBuilder(builder => builder.UseSetting("BancontactPro:Environment", "Production"));
+        var client = production.CreateClient();
+        client.DefaultRequestHeaders.Add(SampleEndpoints.ApiKeyHeader, SampleKey);
+
+        using var payment = JsonDocument.Parse(await client.GetStringAsync("/OnDisplay/qr/payment-url?amount=1000"));
+        using var sticker = JsonDocument.Parse(await client.GetStringAsync("/StaticQr/qr/pos/till-1"));
+
+        Assert.Equal("https://pay.bancontact.net/t/1/on-display-ppid?A=1000", payment.RootElement.GetProperty("payloadUrl").GetString());
+        Assert.StartsWith("https://qrcodegenerator.api.bancontact.net/qrcode?f=PNG&c=", payment.RootElement.GetProperty("qrCodeImageUrl").GetString());
+        Assert.Equal("https://pay.bancontact.net/l/1/static-qr-ppid/till-1", sticker.RootElement.GetProperty("payloadUrl").GetString());
+        Assert.StartsWith("https://qrcodegenerator.api.bancontact.net/qrcode?f=PNG&c=", sticker.RootElement.GetProperty("qrCodeImageUrl").GetString());
     }
 
     // --- Errors say why ---

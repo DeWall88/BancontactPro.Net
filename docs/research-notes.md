@@ -70,8 +70,8 @@ endpoint exists in any of the three specs). Whether the bare key is also accepte
 - A per-payment `callbackUrl` is accepted and echoed in `creditor.callbackUrl`.
 - Preprod payment links use other hosts than production: `_links.deeplink` is on
   `pay.acc.bancontact.net` and `_links.qrcode` on `qrcodegenerator.api.preprod.bancontact.net`.
-  `PaymentLinkBuilder` currently always builds the production hosts (`pay.bancontact.net`,
-  `qrcodegenerator.api.bancontact.net`), so locally built QR codes don't target preprod yet.
+  `PaymentLinkBuilder` now builds these hosts for `Preprod` (it used to build the production
+  ones regardless). See "Preprod hosts for self-built payload URLs" below.
 - Timestamps come with microseconds and a `+00:00` offset (`2026-10-15T21:34:07.729375+00:00`),
   not the `.sssZ` the spec shows; `DateTimeOffset` parses both.
 
@@ -375,7 +375,8 @@ slug), gives the actual old→new URL table the generic per-page banners never s
 | `_links.checkout.href` | `https://checkout.bancontact.net/?...` | `https://pay.bancontact.net/?...` |
 | Static QR / On a Receipt / Top Up / Invoice payload URLs | `https://payconiq.com/t/1/{PPID}?D=...&A=...&R=...` | `https://pay.bancontact.net/t/1/{PPID}?D=...&A=...&R=...` |
 
-The QR-code-image generator host itself (`https://qrcodegenerator.api.bancontact.net/qrcode?...`)
+The QR-code-image generator host itself (`https://qrcodegenerator.api.bancontact.net/qrcode?...`,
+production; preprod has its own, see below)
 is **not** changing — only the `c=` payload URL embedded inside it. Already live in
 pre-production; rolls out to production **2026-11-05**. Printed QR codes using the old
 `payconiq.com` URLs keep working only **until 2026-06-15** — after that, old-domain codes may
@@ -400,6 +401,44 @@ any of the three OpenAPI specs (it's pure URL templating, not an HTTP call), so 
 to the "verify against the raw spec" pass that scoped issues #2–#7 — it only surfaced once the
 prose guides for the specific products actually onboarded for were read end-to-end. Tracked as a
 new feature: see `BancontactPro.QrCodes.PaymentLinkBuilder`.
+
+### Preprod hosts for self-built payload URLs (2026-10-16)
+
+**What the docs say.** Read again: the Payment link update page and the On a Receipt, Top Up,
+Static QR, Invoice, On a Display and Getting started guides (their `.md` sources).
+
+- None of them gives a preprod host for the self-built `/t/1/{PPID}` or `/l/1/{PPID}/{POSId}`
+  payload URLs, or a preprod QR code generator. Every payload and generator example uses the
+  production hosts (`pay.bancontact.net`, or still `payconiq.com` on the Top Up and Static QR
+  pages, and `qrcodegenerator.api.bancontact.net`).
+- The only preprod pay host they name is in the migration page's note that the URLs *sent by the
+  API* in pre-production all use `pay.acc.bancontact.net` (the page misspells it
+  "banconcat") and not `pay.preprod.bancontact.net`. It is silent on URLs the merchant builds.
+- The only preprod host stated anywhere else is the Merchant API's,
+  `merchant.api.preprod.bancontact.net`.
+
+**What preprod itself shows.**
+
+- A real preprod create-payment response (2026-10-15) had `_links.deeplink` on
+  `pay.acc.bancontact.net` and `_links.qrcode` on `qrcodegenerator.api.preprod.bancontact.net`.
+- Unauthenticated GETs to the QR generators (2026-10-16):
+  - The preprod generator renders `pay.acc.bancontact.net` payloads for `/t/1/...`, `/l/1/...`
+    and `/pay/2/...`. It also renders `pay.bancontact.net` and `payconiq.com` payloads, but
+    answers 400 for a `pay.preprod.bancontact.net` payload.
+  - The production generator answers 400 for a `pay.acc.bancontact.net` payload.
+  - So the generators check the payload's host against a list, and `pay.acc` is on preprod's list
+    only. The old builder's production pair rendered fine but pointed the payer at production.
+- The `pay.*` hosts return the same 637-byte HTML shell for any path, including made-up ones and
+  `pay.preprod.bancontact.net`, so requesting a payload URL proves nothing about it.
+
+**What the library does.** `PaymentLinkBuilder` takes a `BancontactEnvironment` and builds
+`pay.acc.bancontact.net` plus `qrcodegenerator.api.preprod.bancontact.net` for `Preprod`, and the
+documented production hosts for `Production`.
+
+**Not yet verified:** that the preprod Bancontact Pay app opens a self-built
+`pay.acc.bancontact.net/t/1/{PPID}` or `/l/1/{PPID}/{POSId}` QR code for a real preprod PPID.
+Scanning one with the preprod app settles it. If it fails, ask devsupport which host self-built
+preprod payloads should use.
 
 ---
 

@@ -139,10 +139,25 @@ builds it locally by templating a known URL scheme, confirmed against Bancontact
 page and the per-product guides:
 
 ```text
-payload (On a Receipt / Top Up)  = https://pay.bancontact.net/t/1/{PPID}?D={description}&A={amountCents}&R={reference}
-payload (Static QR, printed once) = https://pay.bancontact.net/l/1/{PPID}/{posId}
-qr image                          = https://qrcodegenerator.api.bancontact.net/qrcode?f={PNG|SVG}&s={S|M|L|XL}&c={url-encoded payload}
+payload (On a Receipt / Top Up)  = {pay host}/t/1/{PPID}?D={description}&A={amountCents}&R={reference}
+payload (Static QR, printed once) = {pay host}/l/1/{PPID}/{posId}
+qr image                          = {qr generator host}/qrcode?f={PNG|SVG}&s={S|M|L|XL}&c={url-encoded payload}
 ```
+
+The hosts depend on the environment, so every method takes a `BancontactEnvironment` (callers pass
+`BancontactProOptions.Environment`). The builder stays a static class rather than a DI service:
+it needs nothing else from configuration, and a required parameter can't be forgotten the way an
+optional one defaulting to production could.
+
+| Environment | `{pay host}` | `{qr generator host}` |
+|---|---|---|
+| `Production` | `https://pay.bancontact.net` | `https://qrcodegenerator.api.bancontact.net` |
+| `Preprod` | `https://pay.acc.bancontact.net` | `https://qrcodegenerator.api.preprod.bancontact.net` |
+
+The guides publish only the production hosts. The preprod pair comes from the links the preprod
+API itself returns; [research-notes.md](research-notes.md) has the evidence and what is still
+unverified. The production generator rejects the preprod pay host, which is why the payload and
+the image URL must be built for the same environment.
 
 Two encoding passes matter here, and `PaymentLinkBuilder` replicates both rather than
 flattening them into one: the individual `D`/`A`/`R` values are UTF-8 percent-encoded once when

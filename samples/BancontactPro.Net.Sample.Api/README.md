@@ -32,8 +32,8 @@ Request and response bodies are Bancontact's own shapes (see the [Merchant Payme
 | `GET /{product}/v3/reconciliation/payouts?date&page&size` | `Reconciliation(product).GetPayoutsAsync` | `GET /v3/reconciliation/payouts` (signed) |
 | `GET /{product}/v3/reconciliation/payments?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetPaymentsAsync` | `GET /v3/reconciliation/payments` (signed) |
 | `GET /{product}/v3/reconciliation/refunds?payoutId&startDate&endDate&page&size` | `Reconciliation(product).GetRefundsAsync` | `GET /v3/reconciliation/refunds` (signed) |
-| `GET /{product}/qr/payment-url?amount&description&reference&format&size` | `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` + `BuildQrCodeImageUrl` | none: built with the product's PPID |
-| `GET /{product}/qr/pos/{posId}?format&size` | `PaymentLinkBuilder.BuildStaticQrLocationUrl` + `BuildQrCodeImageUrl` | none: the till's Static QR sticker |
+| `GET /{product}/qr/payment-url?amount&description&reference&format&size` | `PaymentLinkBuilder.BuildFixedAmountPaymentUrl` + `BuildQrCodeImageUrl` | none: built with the product's PPID, on the configured environment's hosts |
+| `GET /{product}/qr/pos/{posId}?format&size` | `PaymentLinkBuilder.BuildStaticQrLocationUrl` + `BuildQrCodeImageUrl` | none: the till's Static QR sticker, on the configured environment's hosts |
 | `POST /bancontact/callback` | `BancontactCallbackVerifier` | Bancontact calls this |
 | `GET /callbacks?paymentId` | none | The last 100 verified callbacks, newest first |
 | `GET /health` | none | Liveness |
